@@ -5,6 +5,7 @@
 #include "lexer/lexer.h"
 #include "parser/parser.h"
 #include "abstract-syntax-tree/ast_printer.h"
+#include "semantic/semantic_analyzer.h"
 
 
 int main(int argc, char** argv) {
@@ -38,6 +39,17 @@ int main(int argc, char** argv) {
 
     std::cout << "Parsed " << statements.size() << " statements." << std::endl;
 
+
+        SemanticAnalyzer analyzer;
+    try {
+        analyzer.analyze(statements);
+        std::cout << "Semantic analysis passed.\n";
+    } catch (const std::runtime_error& e) {
+        std::cerr << "Semantic error: " << e.what() << "\n";
+        return 1;
+    }     
+
+    
     std::cout << "\n===== AST =====\n";
     for (const auto& stmt : statements) {
         printStmt(stmt.get());

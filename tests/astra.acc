@@ -1,5 +1,3 @@
 let x = 42
 let name = "Accord"
 
-print(x)
-print(name)
