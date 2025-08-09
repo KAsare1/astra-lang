@@ -4,7 +4,7 @@ CFLAGS=-Wall -std=c11
 CXXFLAGS=-Wall -std=c++17
 SRC_DIR=src
 BUILD_DIR=build
-TARGET=compiler
+TARGET=astra
 
 C_SRCS=$(shell find $(SRC_DIR) -name '*.c')
 CXX_SRCS=$(shell find $(SRC_DIR) -name '*.cpp')
