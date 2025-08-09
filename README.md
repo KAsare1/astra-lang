@@ -16,7 +16,7 @@ This document describes the *current syntax* as supported by the lexer and parse
 │ ├── parser/ # Parser build artifacts
 │ └── main.o
 ├── compiler # Final compiled executable
-├── examples/ # Example Astreon programs
+├── examples/ # Example Astra programs
 ├── Makefile # Build automation
 ├── src/
 │ ├── abstract-syntax-tree/ # AST node definitions
