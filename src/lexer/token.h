@@ -1,6 +1,15 @@
 #pragma once
 #include <string>
 
+
+// Token structure
+struct Token {
+    TokenType type;
+    std::string lexeme;
+    int line;
+    int column;
+};
+
 // Enum for all possible token types
 enum class TokenType {
     // Keywords
@@ -88,12 +97,3 @@ inline const char* tokenTypeToString(TokenType type) {
     }
 }
 
-
-
-// Token structure
-struct Token {
-    TokenType type;
-    std::string lexeme;
-    int line;
-    int column;
-};

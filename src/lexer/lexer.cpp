@@ -1,24 +1,35 @@
+
 #include "lexer.h"
 #include <cctype>
 #include <stdexcept>
 #include "keywords.h"
 
+
+// Constructor: initializes the lexer with the source code string
 Lexer::Lexer(const std::string &src) : source(src) {}
 
+
+// Returns the current character without consuming it
 char Lexer::peek() const {
     return isAtEnd() ? '\0' : source[pos];
 }
 
+
+// Returns the next character without consuming it
 char Lexer::peekNext() const {
     return (pos + 1 >= source.size()) ? '\0' : source[pos + 1];
 }
 
+
+// Consumes and returns the current character, advancing the position
 char Lexer::advance() {
     char c = source[pos++];
     column++;
     return c;
 }
 
+
+// If the current character matches 'expected', consumes it and returns true
 bool Lexer::match(char expected) {
     if (isAtEnd() || source[pos] != expected) return false;
     pos++;
@@ -26,20 +37,28 @@ bool Lexer::match(char expected) {
     return true;
 }
 
+
+// Returns true if we've reached the end of the source
 bool Lexer::isAtEnd() const {
     return pos >= source.size();
 }
 
+
+// Adds a token of the given type and lexeme to the token list
 void Lexer::addToken(TokenType type, const std::string &lexeme) {
     tokens.push_back({type, lexeme, line, column - (int)lexeme.size()});
 }
 
+
+// Returns the TokenType for a given word, or IDENTIFIER if not a keyword
 TokenType Lexer::keywordType(const std::string &word) const {
     auto it = keywords.find(word);
     if (it != keywords.end()) return it->second;
     return TokenType::IDENTIFIER;
 }
 
+
+// Skips whitespace characters (space, tab, newline, etc.)
 void Lexer::skipWhitespace() {
     for (;;) {
         char c = peek();
@@ -58,6 +77,8 @@ void Lexer::skipWhitespace() {
     }
 }
 
+
+// Skips single-line (//) and multi-line (/* ... */) comments
 void Lexer::skipComment() {
     if (match('/')) {
         while (peek() != '\n' && !isAtEnd()) advance();
@@ -70,6 +91,8 @@ void Lexer::skipComment() {
     }
 }
 
+
+// Lexes an identifier or keyword
 void Lexer::identifier() {
     size_t start = pos - 1;
     while (std::isalnum(peek()) || peek() == '_') advance();
@@ -77,6 +100,8 @@ void Lexer::identifier() {
     addToken(keywordType(word), word);
 }
 
+
+// Lexes a number literal (integer or float)
 void Lexer::number() {
     size_t start = pos - 1;
     bool isFloat = false;
@@ -90,6 +115,8 @@ void Lexer::number() {
     addToken(isFloat ? TokenType::FLOAT_LITERAL : TokenType::INT_LITERAL, num);
 }
 
+
+// Lexes a string literal
 void Lexer::stringLiteral() {
     size_t startPos = pos;
     while (peek() != '"' && !isAtEnd()) {
@@ -102,6 +129,8 @@ void Lexer::stringLiteral() {
     addToken(TokenType::STRING_LITERAL, val);
 }
 
+
+// Lexes a character literal
 void Lexer::charLiteral() {
     char c = advance();
     if (c == '\\') advance();
@@ -110,6 +139,8 @@ void Lexer::charLiteral() {
     addToken(TokenType::CHAR_LITERAL, std::string(1, c));
 }
 
+
+// Lexes a symbol or operator token
 void Lexer::symbol() {
     char c = advance();
     switch (c) {
@@ -167,6 +198,8 @@ void Lexer::symbol() {
     }
 }
 
+
+// Main lexing loop: tokenizes the entire source string
 std::vector<Token> Lexer::tokenize() {
     while (!isAtEnd()) {
         skipWhitespace();
