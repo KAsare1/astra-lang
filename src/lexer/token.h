@@ -2,13 +2,6 @@
 #include <string>
 
 
-// Token structure
-struct Token {
-    TokenType type;
-    std::string lexeme;
-    int line;
-    int column;
-};
 
 // Enum for all possible token types
 enum class TokenType {
@@ -25,6 +18,20 @@ enum class TokenType {
     // Special
     END_OF_FILE, UNKNOWN
 };
+
+
+// Token structure
+struct Token {
+    TokenType type;
+    std::string lexeme;
+    int line;
+    int column;
+    
+    // Constructor
+    Token(TokenType t, const std::string &l, int ln, int col)
+        : type(t), lexeme(l), line(ln), column(col) {}
+};
+
 
 
 inline const char* tokenTypeToString(TokenType type) {

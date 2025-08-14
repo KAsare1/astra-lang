@@ -6,7 +6,10 @@
 #include "parser/parser.h"
 #include "abstract-syntax-tree/ast_printer.h"
 #include "semantic/semantic_analyzer.h"
+#include "code-generator/ir_codegen.h"
 
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FileSystem.h"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -24,9 +27,9 @@ int main(int argc, char** argv) {
     buffer << file.rdbuf();
     std::string source = buffer.str();
 
+    // Lex
     Lexer lexer(source);
     std::vector<Token> tokens;
-
     try {
         tokens = lexer.tokenize();
     } catch (const std::runtime_error& e) {
@@ -34,35 +37,59 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Parse
     Parser parser(tokens);
     auto statements = parser.parse();
+    std::cout << "Parsed " << statements.size() << " statements.\n";
 
-    std::cout << "Parsed " << statements.size() << " statements." << std::endl;
-
-
-        SemanticAnalyzer analyzer;
+    // Semantic
+    SemanticAnalyzer analyzer;
     try {
         analyzer.analyze(statements);
         std::cout << "Semantic analysis passed.\n";
     } catch (const std::runtime_error& e) {
         std::cerr << "Semantic error: " << e.what() << "\n";
         return 1;
-    }     
+    }
 
-    
+    // AST (debug)
     std::cout << "\n===== AST =====\n";
     for (const auto& stmt : statements) {
         printStmt(stmt.get());
     }
 
+    // Tokens (debug)
     std::cout << "\n===== TOKENS =====\n";
     for (const auto& token : tokens) {
-        std::cout << "(" 
-                << tokenTypeToString(token.type) << ", "
-                << "\"" << token.lexeme << "\", "
-                << token.line << ", "
-                << token.column
-                << ")\n";
+        std::cout << "("
+                  << tokenTypeToString(token.type) << ", "
+                  << "\"" << token.lexeme << "\", "
+                  << token.line << ", "
+                  << token.column
+                  << ")\n";
+    }
+
+    // ---------- IR Generation ----------
+    try {
+        SymbolTable syms; // if you maintain a global one from semantic, pass that instead
+        IRCodegen codegen("AstraModule", syms);
+        codegen.emit(statements);
+
+        // Print to stderr for quick inspection
+        codegen.getModule().print(llvm::errs(), nullptr);
+
+        // Write to file
+        std::error_code ec;
+        llvm::raw_fd_ostream out("build/output.ll", ec, llvm::sys::fs::OF_Text);
+        if (ec) {
+            std::cerr << "Error opening build/output.ll: " << ec.message() << "\n";
+            return 1;
+        }
+        codegen.getModule().print(out, nullptr);
+        std::cout << "\nWrote IR to build/output.ll\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Codegen error: " << e.what() << "\n";
+        return 1;
     }
 
     return 0;

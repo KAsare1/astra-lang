@@ -42,7 +42,7 @@ private:
             }
             return symbols.getType(varExpr->name);
         }
-        else if (auto literal = dynamic_cast<const LiteralExpr*>(expr)) {
+        else if (dynamic_cast<const LiteralExpr*>(expr)) {
             return "int"; // Example: assume all literals are integers for now
         }
         else if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {

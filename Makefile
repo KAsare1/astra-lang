@@ -1,10 +1,14 @@
 CC=gcc
 CXX=g++
 CFLAGS=-Wall -std=c11
-CXXFLAGS=-Wall -std=c++17
+CXXFLAGS=-Wall -std=c++17 -I$(LLVM_DIR)/include
 SRC_DIR=src
 BUILD_DIR=build
 TARGET=astra
+
+LLVM_DIR=/opt/homebrew/opt/llvm
+LDFLAGS=-L$(LLVM_DIR)/lib -Wl,-rpath,$(LLVM_DIR)/lib
+LDLIBS=$(shell $(LLVM_DIR)/bin/llvm-config --libs all) $(shell $(LLVM_DIR)/bin/llvm-config --system-libs)
 
 C_SRCS=$(shell find $(SRC_DIR) -name '*.c')
 CXX_SRCS=$(shell find $(SRC_DIR) -name '*.cpp')
@@ -21,7 +25,7 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 all: $(TARGET)
 
