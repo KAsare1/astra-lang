@@ -1,6 +1,7 @@
 #pragma once
 #include "../lexer/lexer.h"
 #include "../abstract-syntax-tree/ast.h"
+#include "../shared/symbol_table.h"
 #include <stdexcept>
 #include <memory>
 #include <vector>
@@ -9,10 +10,13 @@ class Parser {
 public:
     Parser(const std::vector<Token>& tokens);
     std::vector<std::unique_ptr<Stmt>> parse();
+    void enterScope();
+    void exitScope();
 
 private:
     const std::vector<Token>& tokens;
     size_t current = 0;
+    SymbolTable symbolTable; // Add a SymbolTable instance
 
     // Utility functions
     bool isAtEnd() const;
@@ -21,6 +25,7 @@ private:
     const Token& advance();
     bool check(TokenType type) const;
     bool match(std::initializer_list<TokenType> types);
+    Token consume(TokenType type, const std::string& errorMessage);
 
     // Grammar rules
     std::unique_ptr<Stmt> declaration();

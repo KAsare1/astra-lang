@@ -1,4 +1,3 @@
-
 #include "lexer.h"
 #include <cctype>
 #include <stdexcept>
@@ -97,7 +96,16 @@ void Lexer::identifier() {
     size_t start = pos - 1;
     while (std::isalnum(peek()) || peek() == '_') advance();
     std::string word = source.substr(start, pos - start);
-    addToken(keywordType(word), word);
+
+    TokenType type = keywordType(word);
+    if (type == TokenType::IDENTIFIER) {
+        // Add the identifier to the symbol table
+        if (!symbolTable.isDeclared(word)) {
+            symbolTable.declare(word);
+        }
+    }
+
+    addToken(type, word);
 }
 
 
@@ -213,4 +221,12 @@ std::vector<Token> Lexer::tokenize() {
     }
     addToken(TokenType::END_OF_FILE, "");
     return tokens;
+}
+
+void Lexer::enterScope() {
+    symbolTable.enterScope();
+}
+
+void Lexer::exitScope() {
+    symbolTable.exitScope();
 }

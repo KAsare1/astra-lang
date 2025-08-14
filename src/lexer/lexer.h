@@ -2,17 +2,21 @@
 #include <string>
 #include <vector>
 #include "token.h"
+#include "../shared/symbol_table.h"
 
 class Lexer {
 public:
     Lexer(const std::string &src);
     std::vector<Token> tokenize();
+    void enterScope(); // Manage SymbolTable scope
+    void exitScope(); // Manage SymbolTable scope
 private:
     const std::string &source;
     size_t pos = 0;
     int line = 1;
     int column = 1;
     std::vector<Token> tokens;
+    SymbolTable symbolTable; // Add a symbol table instance
 
     char peek() const;
     char peekNext() const;

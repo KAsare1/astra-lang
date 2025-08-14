@@ -38,21 +38,36 @@ bool Parser::match(std::initializer_list<TokenType> types) {
     return false;
 }
 
+Token Parser::consume(TokenType type, const std::string& errorMessage) {
+    if (check(type)) {
+        return advance();
+    }
+    throw std::runtime_error(errorMessage);
+}
+
 std::unique_ptr<Stmt> Parser::declaration() {
     if (match({TokenType::KW_LET})) return varDeclaration();
     return statement();
 }
 
 std::unique_ptr<Stmt> Parser::varDeclaration() {
-    if (!check(TokenType::IDENTIFIER))
-        throw std::runtime_error("Expected variable name.");
-    std::string name = advance().lexeme;
+    Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
+
+    // Check if the variable is already declared in the current scope
+    if (symbolTable.isDeclared(name.lexeme)) {
+        throw std::runtime_error("Variable '" + name.lexeme + "' is already declared in this scope.");
+    }
+
+    // Add the variable to the symbol table
+    symbolTable.declare(name.lexeme);
 
     std::unique_ptr<Expr> initializer = nullptr;
-    if (match({TokenType::ASSIGN})) {
+    if (match({TokenType::EQUAL})) {
         initializer = expression();
     }
-    return std::make_unique<VarDeclStmt>(name, std::move(initializer));
+
+    consume(TokenType::SEMICOLON, "Expected ';' after variable declaration.");
+    return std::make_unique<VarDeclStmt>(name.lexeme, std::move(initializer));
 }
 
 std::unique_ptr<Stmt> Parser::statement() {
@@ -88,7 +103,22 @@ std::unique_ptr<Expr> Parser::primary() {
         return std::make_unique<LiteralExpr>(previous().lexeme);
     }
     if (match({TokenType::IDENTIFIER})) {
-        return std::make_unique<VariableExpr>(previous().lexeme);
+        Token name = previous();
+
+        // Check if the variable is declared
+        if (!symbolTable.isDeclared(name.lexeme)) {
+            throw std::runtime_error("Variable '" + name.lexeme + "' is not declared.");
+        }
+
+        return std::make_unique<VariableExpr>(name.lexeme);
     }
     throw std::runtime_error("Expected expression.");
+}
+
+void Parser::enterScope() {
+    symbolTable.enterScope();
+}
+
+void Parser::exitScope() {
+    symbolTable.exitScope();
 }

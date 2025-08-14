@@ -1,6 +1,6 @@
 #pragma once
 #include "../abstract-syntax-tree/ast.h"
-#include "symbol_table.h"
+#include "../shared/symbol_table.h"
 #include <stdexcept>
 
 class SemanticAnalyzer {
@@ -26,31 +26,39 @@ private:
 
     void handleVarDecl(const VarDeclStmt* varDecl) {
         symbols.declare(varDecl->name);
+        symbols.setType(varDecl->name, "int"); // Example: set type to "int"
         if (varDecl->initializer) {
-            analyzeExpr(varDecl->initializer.get());
+            std::string initializerType = analyzeExpr(varDecl->initializer.get());
+            if (initializerType != "int") {
+                throw std::runtime_error("Type mismatch: variable '" + varDecl->name + "' is declared as 'int' but initialized with '" + initializerType + "'");
+            }
         }
     }
 
-    void analyzeExpr(const Expr* expr) {
+    std::string analyzeExpr(const Expr* expr) {
         if (auto varExpr = dynamic_cast<const VariableExpr*>(expr)) {
             if (!symbols.isDeclared(varExpr->name)) {
                 throw std::runtime_error("Use of undeclared variable '" + varExpr->name + "'");
             }
+            return symbols.getType(varExpr->name);
         }
         else if (auto literal = dynamic_cast<const LiteralExpr*>(expr)) {
-            (void)literal; // nothing to check for literals yet
+            return "int"; // Example: assume all literals are integers for now
         }
         else if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {
-            analyzeExpr(binary->left.get());
-            analyzeExpr(binary->right.get());
+            std::string leftType = analyzeExpr(binary->left.get());
+            std::string rightType = analyzeExpr(binary->right.get());
+            if (leftType != rightType) {
+                throw std::runtime_error("Type mismatch in binary expression: '" + leftType + "' and '" + rightType + "'");
+            }
+            return leftType; // Return the resulting type
         }
         else if (auto call = dynamic_cast<const CallExpr*>(expr)) {
             if (!symbols.isDeclared(call->callee)) {
                 throw std::runtime_error("Call to undeclared function '" + call->callee + "'");
             }
-            for (auto& arg : call->arguments) {
-                analyzeExpr(arg.get());
-            }
+            return symbols.getType(call->callee); // Assume the function's return type is stored in the SymbolTable
         }
+        throw std::runtime_error("Unknown expression type");
     }
 };
