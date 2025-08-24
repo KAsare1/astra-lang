@@ -13,7 +13,7 @@ enum class TokenType {
     // Symbols
     PLUS, MINUS, STAR, SLASH, PERCENT, ASSIGN, EQ, NEQ, LT, LTE, GT, GTE,
     AND_AND, OR_OR, AMP, AMP_MUT, BANG, DOT, COMMA, COLON, SEMICOLON,
-    LPAREN, RPAREN, LBRACE, RBRACE, LBRACK, RBRACK, ARROW, EQUAL, COLON_ASSIGN, FAT_ARROW, PIPE, 
+    LPAREN, RPAREN, LBRACE, RBRACE, LBRACK, RBRACK, ARROW, COLON_ASSIGN, FAT_ARROW, PIPE, 
 
     // Special
     END_OF_FILE, UNKNOWN
@@ -92,7 +92,6 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::LBRACK:      return "LBRACK";
         case TokenType::RBRACK:      return "RBRACK";
         case TokenType::ARROW:       return "ARROW";
-        case TokenType::EQUAL:       return "EQUAL";
         case TokenType::COLON_ASSIGN: return "COLON_ASSIGN";
         case TokenType::PIPE: return "PIPE";
         case TokenType::UNKNOWN: return "UNKNOWN";

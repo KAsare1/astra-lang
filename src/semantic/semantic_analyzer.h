@@ -13,6 +13,10 @@ public:
         }
     }
 
+        const SymbolTable& getSymbolTable() const {
+        return symbols;
+    }
+
 private:
     void analyzeStmt(const Stmt* stmt) {
         if (auto varDecl = dynamic_cast<const VarDeclStmt*>(stmt)) {

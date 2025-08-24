@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <iostream>
 
 struct Symbol {
     std::string name;
@@ -65,5 +66,16 @@ public:
             }
         }
         throw std::runtime_error("Symbol not found: " + name);
+    }
+
+    // Print the contents of the symbol table
+    void print() const {
+        std::cout << "Symbol Table:" << std::endl;
+        for (size_t i = 0; i < scopes.size(); ++i) {
+            std::cout << "Scope " << i << ":" << std::endl;
+            for (const auto& [name, symbol] : scopes[i]) {
+                std::cout << "  " << name << " -> Type: " << symbol.type << std::endl;
+            }
+        }
     }
 };

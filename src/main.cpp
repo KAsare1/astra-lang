@@ -7,6 +7,7 @@
 #include "abstract-syntax-tree/ast_printer.h"
 #include "semantic/semantic_analyzer.h"
 #include "code-generator/ir_codegen.h"
+// #include "shared/symbol_table.h"
 
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
@@ -68,6 +69,11 @@ int main(int argc, char** argv) {
                   << token.column
                   << ")\n";
     }
+
+    // Visualize SymbolTable (debug)
+    std::cout << "\n===== SYMBOL TABLE =====\n";
+    // If SemanticAnalyzer does not expose the symbol table, comment out or implement getSymbolTable()
+    analyzer.getSymbolTable().print();
 
     // ---------- IR Generation ----------
     try {
