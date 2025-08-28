@@ -7,7 +7,7 @@
 #include "abstract-syntax-tree/ast_printer.h"
 #include "semantic/semantic_analyzer.h"
 #include "code-generator/ir_codegen.h"
-// #include "shared/symbol_table.h"
+#include "code-generator/target/target_codegen.h" 
 
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
 
     std::ifstream file(argv[1]);
     if (!file) {
-        std::cerr << "Error: Cannot open file " << argv[1] << "\n";
+        std::cerr << "Error: Cannot open file xoxox " << argv[1] << "\n";
         return 1;
     }
 
@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
     // Parse
     Parser parser(tokens);
     auto statements = parser.parse();
-    std::cout << "Parsed " << statements.size() << " statements.\n";
+    std::cout << "Parsed" << statements.size() << " statements.\n";
 
     // Semantic
     SemanticAnalyzer analyzer;
@@ -53,46 +53,30 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // AST (debug)
-    std::cout << "\n===== AST =====\n";
-    for (const auto& stmt : statements) {
-        printStmt(stmt.get());
-    }
-
-    // Tokens (debug)
-    std::cout << "\n===== TOKENS =====\n";
-    for (const auto& token : tokens) {
-        std::cout << "("
-                  << tokenTypeToString(token.type) << ", "
-                  << "\"" << token.lexeme << "\", "
-                  << token.line << ", "
-                  << token.column
-                  << ")\n";
-    }
-
-    // Visualize SymbolTable (debug)
-    std::cout << "\n===== SYMBOL TABLE =====\n";
-    // If SemanticAnalyzer does not expose the symbol table, comment out or implement getSymbolTable()
-    analyzer.getSymbolTable().print();
-
     // ---------- IR Generation ----------
     try {
-        SymbolTable syms; // if you maintain a global one from semantic, pass that instead
-        IRCodegen codegen("AstraModule", syms);
-        codegen.emit(statements);
+        SymbolTable syms; 
+        IRCodegen irgen("AstraModule", syms);
+        irgen.emit(statements);
 
-        // Print to stderr for quick inspection
-        codegen.getModule().print(llvm::errs(), nullptr);
+        llvm::Module &module = irgen.getModule();
 
-        // Write to file
+        // Write LLVM IR to file
         std::error_code ec;
-        llvm::raw_fd_ostream out("build/output.ll", ec, llvm::sys::fs::OF_Text);
+        llvm::raw_fd_ostream irOut("build/output.ll", ec, llvm::sys::fs::OF_Text);
         if (ec) {
             std::cerr << "Error opening build/output.ll: " << ec.message() << "\n";
             return 1;
         }
-        codegen.getModule().print(out, nullptr);
-        std::cout << "\nWrote IR to build/output.ll\n";
+        module.print(irOut, nullptr);
+        std::cout << "Wrote LLVM IR to build/output.ll\n";
+
+        // ---------- Target Code Generation ----------
+        TargetCodegen targetGen(module);
+        targetGen.emitAssembly("build/output.s");   // 🔹 emits assembly
+        targetGen.emitObject("build/output.o");     // 🔹 emits object code
+        std::cout << "Wrote assembly to build/output.s and object to build/output.o\n";
+
     } catch (const std::exception& e) {
         std::cerr << "Codegen error: " << e.what() << "\n";
         return 1;

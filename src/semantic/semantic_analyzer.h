@@ -2,22 +2,33 @@
 #include "../abstract-syntax-tree/ast.h"
 #include "../shared/symbol_table.h"
 #include <stdexcept>
+#include <vector>
 
 class SemanticAnalyzer {
     SymbolTable symbols;
 
 public:
+    SemanticAnalyzer() {
+        initializeBuiltins();
+    }
+
     void analyze(const std::vector<std::unique_ptr<Stmt>>& statements) {
         for (const auto& stmt : statements) {
             analyzeStmt(stmt.get());
         }
     }
 
-        const SymbolTable& getSymbolTable() const {
+    const SymbolTable& getSymbolTable() const {
         return symbols;
     }
 
 private:
+    void initializeBuiltins() {
+        // Declare print (the function your code actually calls)
+        symbols.declare("print");
+        symbols.setType("print", "void(any)"); // Accepts any type due to overloading
+    }
+
     void analyzeStmt(const Stmt* stmt) {
         if (auto varDecl = dynamic_cast<const VarDeclStmt*>(stmt)) {
             handleVarDecl(varDecl);
@@ -30,12 +41,13 @@ private:
 
     void handleVarDecl(const VarDeclStmt* varDecl) {
         symbols.declare(varDecl->name);
-        symbols.setType(varDecl->name, "int"); // Example: set type to "int"
+        
+        // Infer type from initializer if present
         if (varDecl->initializer) {
             std::string initializerType = analyzeExpr(varDecl->initializer.get());
-            if (initializerType != "int") {
-                throw std::runtime_error("Type mismatch: variable '" + varDecl->name + "' is declared as 'int' but initialized with '" + initializerType + "'");
-            }
+            symbols.setType(varDecl->name, initializerType);
+        } else {
+            symbols.setType(varDecl->name, "int"); // Default type
         }
     }
 
@@ -46,8 +58,17 @@ private:
             }
             return symbols.getType(varExpr->name);
         }
-        else if (dynamic_cast<const LiteralExpr*>(expr)) {
-            return "int"; // Example: assume all literals are integers for now
+        else if (auto literal = dynamic_cast<const LiteralExpr*>(expr)) {
+            // Infer type from literal content (similar to your IR codegen logic)
+            const std::string& v = literal->value;
+            bool hasDot = false, allDigitsOrDot = !v.empty();
+            for (char c : v) {
+                if (c == '.') { hasDot = true; continue; }
+                if (c < '0' || c > '9') { allDigitsOrDot = false; break; }
+            }
+            if (allDigitsOrDot && hasDot) return "double";
+            if (allDigitsOrDot && !hasDot) return "int";
+            return "string"; // Everything else is a string
         }
         else if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {
             std::string leftType = analyzeExpr(binary->left.get());
@@ -55,13 +76,24 @@ private:
             if (leftType != rightType) {
                 throw std::runtime_error("Type mismatch in binary expression: '" + leftType + "' and '" + rightType + "'");
             }
-            return leftType; // Return the resulting type
+            return leftType;
         }
         else if (auto call = dynamic_cast<const CallExpr*>(expr)) {
             if (!symbols.isDeclared(call->callee)) {
                 throw std::runtime_error("Call to undeclared function '" + call->callee + "'");
             }
-            return symbols.getType(call->callee); // Assume the function's return type is stored in the SymbolTable
+            
+            // For print function, validate arguments but return void
+            if (call->callee == "print") {
+                if (call->arguments.size() != 1) {
+                    throw std::runtime_error("print() expects exactly one argument");
+                }
+                // Analyze the argument to ensure it's valid
+                analyzeExpr(call->arguments[0].get());
+                return "void";
+            }
+            
+            return symbols.getType(call->callee);
         }
         throw std::runtime_error("Unknown expression type");
     }

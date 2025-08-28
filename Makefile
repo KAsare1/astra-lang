@@ -1,7 +1,7 @@
 CC=gcc
 CXX=g++
 CFLAGS=-Wall -std=c11
-CXXFLAGS=-Wall -std=c++17 -I$(LLVM_DIR)/include
+CXXFLAGS=-Wall -std=c++17 -Isrc $(shell $(LLVM_DIR)/bin/llvm-config --cxxflags | sed 's/-fno-exceptions//g')
 SRC_DIR=src
 BUILD_DIR=build
 TARGET=astra
@@ -31,5 +31,15 @@ all: $(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+test: $(TARGET)
+	./$(TARGET) tests/astra.acc
+	gcc -c src/code-generator/runtime.c -o build/runtime.o
+	gcc build/output.o build/runtime.o -o test_program
+	./test_program
+
+# Clean up generated test files
+test-clean:
+	rm -f test_program build/output.* build/runtime.o
 
 .PHONY: all clean
