@@ -3,7 +3,8 @@
 #include <memory>
 #include <iostream> // Include iostream for debugging logs
 
-Parser::Parser(const std::vector<Token>& tokens) : tokens(tokens) {}
+Parser::Parser(const std::vector<Token>& tokens, SymbolTable& symbols) 
+    : tokens(tokens), symbolTable(symbols) {}
 
 std::vector<std::unique_ptr<Stmt>> Parser::parse() {
     std::vector<std::unique_ptr<Stmt>> statements;
@@ -77,32 +78,27 @@ std::unique_ptr<Stmt> Parser::declaration() {
 
 std::unique_ptr<Stmt> Parser::varDeclaration() {
     std::cerr << "Debug: Starting variable declaration\n";
-    std::cerr << "Debug: Current token before consuming identifier: '" << peek().lexeme << "' (type: " << static_cast<int>(peek().type) << ")\n";
     
     Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
     std::cerr << "Debug: Variable name: '" << name.lexeme << "'\n";
     
-    // Check if the variable is already declared in the current scope
-    if (symbolTable.isDeclared(name.lexeme)) {
+    // Phase 2: Check for redeclaration in current scope
+    if (symbolTable.isDeclaredInCurrentScope(name.lexeme)) {
         throw std::runtime_error("Variable '" + name.lexeme + "' is already declared in this scope.");
     }
     
-    // Add the variable to the symbol table
-    symbolTable.declare(name.lexeme);
+    // Declare the variable
+    symbolTable.declare(name.lexeme, SymbolKind::VARIABLE);
     
     std::unique_ptr<Expr> initializer = nullptr;
-    
-    std::cerr << "Debug: Current token before checking for '=': '" << peek().lexeme << "' (type: " << static_cast<int>(peek().type) << ")\n";
     
     if (match({TokenType::ASSIGN})) {
         std::cerr << "Debug: Found '=', parsing initializer\n";
         initializer = expression();
+        symbolTable.markInitialized(name.lexeme);
         std::cerr << "Debug: Finished parsing initializer\n";
     }
     
-    std::cerr << "Debug: Current token before consuming semicolon: '" << peek().lexeme << "' (type: " << static_cast<int>(peek().type) << ")\n";
-    
-    // Ensure the semicolon is consumed only after handling the initializer
     consume(TokenType::SEMICOLON, "Expected ';' after variable declaration.");
     
     std::cerr << "Debug: Successfully parsed variable declaration\n";

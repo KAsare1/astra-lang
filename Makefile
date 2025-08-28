@@ -33,13 +33,47 @@ clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
 
 test: $(TARGET)
+	@echo "=== Running Astra Compiler with Shared Symbol Table ==="
 	./$(TARGET) tests/astra.acc
+	@echo ""
+	@echo "=== Linking with Runtime ==="
+	gcc -c src/code-generator/runtime.c -o build/runtime.o
+	gcc build/output.o build/runtime.o -o test_program
+	@echo ""
+	@echo "=== Running Compiled Program ==="
+	./test_program
+	@echo ""
+	@echo "=== Test Complete ==="
+
+# Verbose test that shows all intermediate files
+test-verbose: $(TARGET)
+	@echo "=== Running Astra Compiler (Verbose Mode) ==="
+	./$(TARGET) tests/astra.acc
+	@echo ""
+	@echo "=== Generated LLVM IR ==="
+	@cat build/output.ll
+	@echo ""
+	@echo "=== Generated Assembly (first 50 lines) ==="
+	@head -50 build/output.s
+	@echo ""
+	@echo "=== Linking and Running ==="
 	gcc -c src/code-generator/runtime.c -o build/runtime.o
 	gcc build/output.o build/runtime.o -o test_program
 	./test_program
 
-# Clean up generated test files
-test-clean:
-	rm -f test_program build/output.* build/runtime.o
+# Test with different source files
+test-file: $(TARGET)
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make test-file FILE=path/to/your/file.astra"; \
+		exit 1; \
+	fi
+	./$(TARGET) $(FILE)
+	gcc -c src/code-generator/runtime.c -o build/runtime.o
+	gcc build/output.o build/runtime.o -o test_program
+	./test_program
 
-.PHONY: all clean
+# Clean up all generated files
+test-clean:
+	rm -f test_program build/runtime.o build/output.*
+
+.PHONY: test test-verbose test-file test-clean

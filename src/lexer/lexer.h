@@ -6,17 +6,18 @@
 
 class Lexer {
 public:
-    Lexer(const std::string &src);
+    Lexer(const std::string &src, SymbolTable& symbols);  // Updated constructor
     std::vector<Token> tokenize();
     void enterScope(); // Manage SymbolTable scope
     void exitScope(); // Manage SymbolTable scope
+    
 private:
     const std::string &source;
+    SymbolTable& symbolTable;  // Reference to shared symbol table
     size_t pos = 0;
     int line = 1;
     int column = 1;
     std::vector<Token> tokens;
-    SymbolTable symbolTable; // Add a symbol table instance
 
     char peek() const;
     char peekNext() const;

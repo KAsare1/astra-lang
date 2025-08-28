@@ -34,10 +34,13 @@ private:
     std::unique_ptr<llvm::Module> module;
     llvm::IRBuilder<> builder;
 
+    // Reference to shared symbol table
+    SymbolTable& symbolTable;
+
     // Current function (only 'main' for now)
     llvm::Function* currentFunction = nullptr;
 
-    // Local variable storage (name -> alloca)
+    // Local variable storage (name -> alloca) - still needed for LLVM specifics
     std::unordered_map<std::string, llvm::AllocaInst*> namedValues;
 
     // === Helpers ===
@@ -48,6 +51,10 @@ private:
     llvm::Function* getOrCreatePrintInt();
     llvm::Function* getOrCreatePrintDouble();
     llvm::Function* getOrCreatePrintString();
+    
+    // New methods for symbol table integration
+    llvm::Type* getTypeFromSymbolTable(const std::string& name);
+    llvm::Type* stringToLLVMType(const std::string& typeStr);
 
     // === Stmt / Expr generators ===
     void genStmt(const Stmt* stmt);

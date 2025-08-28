@@ -4,8 +4,10 @@
 #include "keywords.h"
 
 
-// Constructor: initializes the lexer with the source code string
-Lexer::Lexer(const std::string &src) : source(src) {}
+// Constructor now takes reference to shared symbol table
+Lexer::Lexer(const std::string &src, SymbolTable& symbols) 
+    : source(src), symbolTable(symbols) {}
+
 
 
 // Returns the current character without consuming it
@@ -98,12 +100,10 @@ void Lexer::identifier() {
     std::string word = source.substr(start, pos - start);
 
     TokenType type = keywordType(word);
-    if (type == TokenType::IDENTIFIER) {
-        // Add the identifier to the symbol table
-        if (!symbolTable.isDeclared(word)) {
-            symbolTable.declare(word);
-        }
-    }
+    // if (type == TokenType::IDENTIFIER) {
+    //     // Phase 1: Lexical Analysis - Create new table entries for identifiers
+    //     symbolTable.declareIdentifier(word, line);
+    // }
 
     addToken(type, word);
 }
@@ -223,10 +223,3 @@ std::vector<Token> Lexer::tokenize() {
     return tokens;
 }
 
-void Lexer::enterScope() {
-    symbolTable.enterScope();
-}
-
-void Lexer::exitScope() {
-    symbolTable.exitScope();
-}

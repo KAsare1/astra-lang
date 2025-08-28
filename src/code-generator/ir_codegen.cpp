@@ -6,7 +6,7 @@
 
 IRCodegen::IRCodegen(const std::string& moduleName, SymbolTable& syms)
     : module(std::make_unique<llvm::Module>(moduleName, context)),
-      builder(context) {}
+      builder(context), symbolTable(syms) {}
 
 // Create: define i32 @main()
 llvm::Function* IRCodegen::createMain() {
@@ -28,11 +28,33 @@ llvm::AllocaInst* IRCodegen::createEntryAlloca(llvm::Function* fn, llvm::Type* t
     return tmp.CreateAlloca(ty, nullptr, name);
 }
 
-// Very small heuristic typing for now:
-//  - all digits -> i64
-//  - digits with '.' -> double
-//  - else -> ptr (string)
-// You can upgrade this to use your SymbolTable types later.
+// Phase 4: Use symbol table information for type decisions
+llvm::Type* IRCodegen::getTypeFromSymbolTable(const std::string& name) {
+    if (symbolTable.isDeclared(name)) {
+        std::string typeStr = symbolTable.getType(name);
+        llvm::Type* llvmType = stringToLLVMType(typeStr);
+        
+        // Phase 4: Store LLVM type information back in symbol table
+        symbolTable.setLLVMType(name, typeStr);
+        
+        return llvmType;
+    }
+    
+    // Fallback to old inference method
+    return llvm::Type::getInt64Ty(context);
+}
+
+llvm::Type* IRCodegen::stringToLLVMType(const std::string& typeStr) {
+    if (typeStr == "int") return llvm::Type::getInt64Ty(context);
+    if (typeStr == "double") return llvm::Type::getDoubleTy(context);
+    if (typeStr == "string") return llvm::PointerType::getUnqual(context);
+    if (typeStr.find("void") != std::string::npos) return llvm::Type::getVoidTy(context);
+    
+    // Default fallback
+    return llvm::Type::getInt64Ty(context);
+}
+
+// Legacy type inference method (kept for backward compatibility)
 llvm::Type* IRCodegen::inferType(const Expr* expr) {
     if (auto lit = dynamic_cast<const LiteralExpr*>(expr)) {
         const std::string& v = lit->value;
@@ -43,16 +65,12 @@ llvm::Type* IRCodegen::inferType(const Expr* expr) {
         }
         if (allDigitsOrDot && hasDot) return llvm::Type::getDoubleTy(context);
         if (allDigitsOrDot && !hasDot) return llvm::Type::getInt64Ty(context);
-        // treat everything else as string literal (opaque pointer)
         return llvm::PointerType::getUnqual(context);
     }
     if (auto var = dynamic_cast<const VariableExpr*>(expr)) {
-        // If you set symbol types, you could switch here.
-        // For now default to i64 and let CallExpr(print) handle casts if needed.
-        (void)var;
-        return llvm::Type::getInt64Ty(context);
+        // Use symbol table if possible, otherwise fallback
+        return getTypeFromSymbolTable(var->name);
     }
-    // Default fallback
     return llvm::Type::getInt64Ty(context);
 }
 
@@ -71,7 +89,6 @@ llvm::Value* IRCodegen::ensurePrintCall(llvm::Value* arg) {
         callee = getOrCreatePrintString();
         return builder.CreateCall(callee, {arg});
     } else {
-        // Try simple promotions: i32 -> i64, float -> double, etc. (not implemented here)
         throw std::runtime_error("print: unsupported argument type in IR codegen");
     }
 }
@@ -140,11 +157,8 @@ void IRCodegen::genStmt(const Stmt* stmt) {
 }
 
 void IRCodegen::genVarDecl(const VarDeclStmt* v) {
-    // Infer type from initializer or default to i64
-    llvm::Type* ty = llvm::Type::getInt64Ty(context);
-    if (v->initializer) {
-        ty = inferType(v->initializer.get());
-    }
+    // Phase 4: Use symbol table type information instead of inference
+    llvm::Type* ty = getTypeFromSymbolTable(v->name);
 
     // allocate in entry block
     auto *alloca = createEntryAlloca(currentFunction, ty, v->name);
@@ -152,13 +166,16 @@ void IRCodegen::genVarDecl(const VarDeclStmt* v) {
     // store initializer if present
     if (v->initializer) {
         llvm::Value* init = genExpr(v->initializer.get());
-        // Simple match: if mismatched (e.g., const string vs i64), you'd insert casts here
-        if (init->getType() != ty) {
-            throw std::runtime_error("Initializer type does not match declared variable storage (prototype stage).");
+        
+        // Type checking using symbol table information
+        Symbol* symbol = symbolTable.getSymbol(v->name);
+        if (symbol && init->getType() != ty) {
+            throw std::runtime_error("Initializer type does not match declared variable type for: " + v->name);
         }
+        
         builder.CreateStore(init, alloca);
     } else {
-        // default-init to 0 / null
+        // default-init to 0 / null based on type from symbol table
         if (ty->isIntegerTy()) {
             builder.CreateStore(llvm::ConstantInt::get(ty, 0), alloca);
         } else if (ty->isDoubleTy()) {
@@ -168,8 +185,7 @@ void IRCodegen::genVarDecl(const VarDeclStmt* v) {
         }
     }
 
-    namedValues[v->name] = alloca;  // register local
-    // (Optional) symbols.setType(v->name, ...string name for type...)
+    namedValues[v->name] = alloca;  // register local mapping for LLVM
 }
 
 void IRCodegen::genExprStmt(const ExprStmt* s) {
@@ -209,12 +225,20 @@ llvm::Value* IRCodegen::genLiteral(const LiteralExpr* lit) {
 }
 
 llvm::Value* IRCodegen::genVariable(const VariableExpr* var) {
-    auto it = namedValues.find(var->name);
-    if (it == namedValues.end()) {
+    // Phase 4: Use symbol table information
+    if (!symbolTable.isDeclared(var->name)) {
         throw std::runtime_error("IR: use of undeclared variable '" + var->name + "'");
     }
+    
+    auto it = namedValues.find(var->name);
+    if (it == namedValues.end()) {
+        throw std::runtime_error("IR: variable not allocated: " + var->name);
+    }
+    
     auto *alloca = it->second;
-    return builder.CreateLoad(alloca->getAllocatedType(), alloca, var->name + ".val");
+    llvm::Type* expectedType = getTypeFromSymbolTable(var->name);
+    
+    return builder.CreateLoad(expectedType, alloca, var->name + ".val");
 }
 
 llvm::Value* IRCodegen::genBinary(const BinaryExpr* /*bin*/) {

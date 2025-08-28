@@ -1,3 +1,4 @@
+// === semantic_analyzer.h changes ===
 #pragma once
 #include "../abstract-syntax-tree/ast.h"
 #include "../shared/symbol_table.h"
@@ -5,10 +6,11 @@
 #include <vector>
 
 class SemanticAnalyzer {
-    SymbolTable symbols;
+private:
+    SymbolTable& symbols;  // Reference to shared symbol table
 
 public:
-    SemanticAnalyzer() {
+    SemanticAnalyzer(SymbolTable& symbolTable) : symbols(symbolTable) {
         initializeBuiltins();
     }
 
@@ -16,6 +18,9 @@ public:
         for (const auto& stmt : statements) {
             analyzeStmt(stmt.get());
         }
+        
+        // Phase 3: Semantic Analysis - Check for unused variables
+        checkForUnusedVariables();
     }
 
     const SymbolTable& getSymbolTable() const {
@@ -24,9 +29,10 @@ public:
 
 private:
     void initializeBuiltins() {
-        // Declare print (the function your code actually calls)
-        symbols.declare("print");
+        // Phase 3: Declare built-in functions with proper attributes
+        symbols.declare("print", SymbolKind::FUNCTION);
         symbols.setType("print", "void(any)"); // Accepts any type due to overloading
+        symbols.markUsed("print"); // Built-ins are always considered "used"
     }
 
     void analyzeStmt(const Stmt* stmt) {
@@ -40,14 +46,15 @@ private:
     }
 
     void handleVarDecl(const VarDeclStmt* varDecl) {
-        symbols.declare(varDecl->name);
-        
-        // Infer type from initializer if present
+        // Phase 3: Semantic Analysis - Type inference and validation
         if (varDecl->initializer) {
             std::string initializerType = analyzeExpr(varDecl->initializer.get());
             symbols.setType(varDecl->name, initializerType);
+            
+            // Variable is already marked as initialized by parser if it has initializer
         } else {
-            symbols.setType(varDecl->name, "int"); // Default type
+            // Default type for uninitialized variables
+            symbols.setType(varDecl->name, "int");
         }
     }
 
@@ -56,10 +63,18 @@ private:
             if (!symbols.isDeclared(varExpr->name)) {
                 throw std::runtime_error("Use of undeclared variable '" + varExpr->name + "'");
             }
+            
+            // Check if variable is initialized before use
+            const Symbol* symbol = symbols.getSymbol(varExpr->name);
+            if (symbol && symbol->kind == SymbolKind::VARIABLE && !symbol->isInitialized) {
+                std::cerr << "Warning: Variable '" << varExpr->name << "' used before initialization\n";
+            }
+            
+            // Variable usage is already marked by parser
             return symbols.getType(varExpr->name);
         }
         else if (auto literal = dynamic_cast<const LiteralExpr*>(expr)) {
-            // Infer type from literal content (similar to your IR codegen logic)
+            // Phase 3: Type inference from literal content
             const std::string& v = literal->value;
             bool hasDot = false, allDigitsOrDot = !v.empty();
             for (char c : v) {
@@ -83,7 +98,10 @@ private:
                 throw std::runtime_error("Call to undeclared function '" + call->callee + "'");
             }
             
-            // For print function, validate arguments but return void
+            // Mark function as used
+            symbols.markUsed(call->callee);
+            
+            // Phase 3: Function call validation
             if (call->callee == "print") {
                 if (call->arguments.size() != 1) {
                     throw std::runtime_error("print() expects exactly one argument");
@@ -96,5 +114,12 @@ private:
             return symbols.getType(call->callee);
         }
         throw std::runtime_error("Unknown expression type");
+    }
+    
+    void checkForUnusedVariables() {
+        auto unusedVars = symbols.getUnusedVariables();
+        for (const std::string& varName : unusedVars) {
+            std::cerr << "Warning: Variable '" << varName << "' declared but never used\n";
+        }
     }
 };
