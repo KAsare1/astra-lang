@@ -3,14 +3,29 @@
 #include <memory>
 #include <iostream> // Include iostream for debugging logs
 
-Parser::Parser(const std::vector<Token>& tokens, SymbolTable& symbols) 
-    : tokens(tokens), symbolTable(symbols) {}
+Parser::Parser(const std::vector<Token>& tokens, SymbolTable& symbols, ErrorHandler& errors) 
+    : tokens(tokens), symbolTable(symbols), errorHandler(errors) {}
 
 std::vector<std::unique_ptr<Stmt>> Parser::parse() {
     std::vector<std::unique_ptr<Stmt>> statements;
+    
     while (!isAtEnd()) {
-        statements.push_back(declaration());
+        try {
+            auto stmt = declaration();
+            if (stmt) {  // Only add non-null statements
+                statements.push_back(std::move(stmt));
+            }
+        } catch (const std::runtime_error& e) {
+            // Should rarely happen now since we use errorHandler
+            synchronize();
+            if (errorHandler.getErrorCount() > 20) {
+                errorHandler.reportFatal(ErrorCategory::SYNTAX, 
+                    "Too many parse errors, stopping compilation");
+                break;
+            }
+        }
     }
+    
     return statements;
 }
 
@@ -49,18 +64,24 @@ Token Parser::consume(TokenType type, const std::string& errorMessage) {
     if (check(type)) {
         return advance();
     }
-    // Debugging log to identify the issue
-    std::cerr << "Error: " << errorMessage << "\n";
-    std::cerr << "Current token: '" << peek().lexeme << "' (type: " << static_cast<int>(peek().type) << ")\n";
-    std::cerr << "Expected token type: " << static_cast<int>(type) << "\n";
     
-    // Let's also print some context
-    std::cerr << "Parser context - current position: " << current << "\n";
-    if (current > 0) {
-        std::cerr << "Previous token: '" << previous().lexeme << "' (type: " << static_cast<int>(previous().type) << ")\n";
+    // Enhanced error reporting with location
+    Token current = peek();
+    errorHandler.reportError(ErrorCategory::SYNTAX, errorMessage, 
+                            current.line, current.column,
+                            "parsing statement");
+    
+    // Add context-specific suggestions
+    if (type == TokenType::SEMICOLON) {
+        errorHandler.addSuggestion("Add semicolon (;) at the end of the statement");
+    } else if (type == TokenType::IDENTIFIER) {
+        errorHandler.addSuggestion("Provide a valid identifier name");
+    } else if (type == TokenType::ASSIGN) {
+        errorHandler.addSuggestion("Use '=' to assign a value");
     }
     
-    throw std::runtime_error(errorMessage);
+    // Return current token for error recovery
+    return current;
 }
 
 std::unique_ptr<Stmt> Parser::declaration() {
@@ -77,31 +98,30 @@ std::unique_ptr<Stmt> Parser::declaration() {
 }
 
 std::unique_ptr<Stmt> Parser::varDeclaration() {
-    std::cerr << "Debug: Starting variable declaration\n";
+    // Remove debug output, use error handler instead
+    Token name = consume(TokenType::IDENTIFIER, "Expected variable name after 'let'");
     
-    Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
-    std::cerr << "Debug: Variable name: '" << name.lexeme << "'\n";
-    
-    // Phase 2: Check for redeclaration in current scope
     if (symbolTable.isDeclaredInCurrentScope(name.lexeme)) {
-        throw std::runtime_error("Variable '" + name.lexeme + "' is already declared in this scope.");
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Variable '" + name.lexeme + "' is already declared in this scope",
+            name.line, name.column, "declaring variable");
+        errorHandler.addSuggestion("Use a different variable name");
+        errorHandler.addSuggestion("Remove the duplicate declaration");
+        // Continue parsing to find more errors
+        return nullptr;  // Return null to skip this declaration
     }
     
-    // Declare the variable
     symbolTable.declare(name.lexeme, SymbolKind::VARIABLE);
     
     std::unique_ptr<Expr> initializer = nullptr;
-    
     if (match({TokenType::ASSIGN})) {
-        std::cerr << "Debug: Found '=', parsing initializer\n";
         initializer = expression();
-        symbolTable.markInitialized(name.lexeme);
-        std::cerr << "Debug: Finished parsing initializer\n";
+        if (initializer) {  // Only mark initialized if expression parsing succeeded
+            symbolTable.markInitialized(name.lexeme);
+        }
     }
     
-    consume(TokenType::SEMICOLON, "Expected ';' after variable declaration.");
-    
-    std::cerr << "Debug: Successfully parsed variable declaration\n";
+    consume(TokenType::SEMICOLON, "Expected ';' after variable declaration");
     return std::make_unique<VarDeclStmt>(name.lexeme, std::move(initializer));
 }
 
@@ -153,14 +173,24 @@ std::unique_ptr<Expr> Parser::primary() {
     
     if (match({TokenType::IDENTIFIER})) {
         Token name = previous();
-        // Check if the variable is declared
         if (!symbolTable.isDeclared(name.lexeme)) {
-            throw std::runtime_error("Variable '" + name.lexeme + "' is not declared.");
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Variable '" + name.lexeme + "' is not declared",
+                name.line, name.column, "parsing expression");
+            // Could add suggestions here for similar variable names
+            return nullptr;  // Return null for error recovery
         }
+        
+        symbolTable.markUsed(name.lexeme);
         return std::make_unique<VariableExpr>(name.lexeme);
     }
     
-    throw std::runtime_error("Expected expression.");
+    Token current = peek();
+    errorHandler.reportError(ErrorCategory::SYNTAX,
+        "Expected expression", current.line, current.column, "parsing primary expression");
+    errorHandler.addSuggestion("Provide a number, string, or variable name");
+    
+    return nullptr;  // Error recovery
 }
 
 void Parser::enterScope() {
@@ -169,4 +199,22 @@ void Parser::enterScope() {
 
 void Parser::exitScope() {
     symbolTable.exitScope();
+}
+
+
+void Parser::synchronize() {
+    advance();
+    
+    while (!isAtEnd()) {
+        if (previous().type == TokenType::SEMICOLON) return;
+        
+        switch (peek().type) {
+            case TokenType::KW_LET:
+                return;
+            default:
+                break;
+        }
+        
+        advance();
+    }
 }

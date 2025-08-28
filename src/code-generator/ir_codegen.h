@@ -5,6 +5,7 @@
 #include <vector>
 #include "../abstract-syntax-tree/ast.h"
 #include "../shared/symbol_table.h"
+#include "../shared/error_handler.h"  // Fixed include path
 
 // LLVM headers
 #include "llvm/IR/IRBuilder.h"
@@ -19,7 +20,7 @@
 
 class IRCodegen {
 public:
-    IRCodegen(const std::string& moduleName, SymbolTable& symbols);
+    IRCodegen(const std::string& moduleName, SymbolTable& symbols, ErrorHandler& errors);
 
     // Generate IR for a whole program (sequence of statements)
     void emit(const std::vector<std::unique_ptr<Stmt>>& statements);
@@ -34,8 +35,9 @@ private:
     std::unique_ptr<llvm::Module> module;
     llvm::IRBuilder<> builder;
 
-    // Reference to shared symbol table
+    // Reference to shared symbol table and error handler
     SymbolTable& symbolTable;
+    ErrorHandler& errorHandler;
 
     // Current function (only 'main' for now)
     llvm::Function* currentFunction = nullptr;
@@ -51,7 +53,7 @@ private:
     llvm::Function* getOrCreatePrintInt();
     llvm::Function* getOrCreatePrintDouble();
     llvm::Function* getOrCreatePrintString();
-    
+
     // New methods for symbol table integration
     llvm::Type* getTypeFromSymbolTable(const std::string& name);
     llvm::Type* stringToLLVMType(const std::string& typeStr);

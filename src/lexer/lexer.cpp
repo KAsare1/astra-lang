@@ -5,8 +5,9 @@
 
 
 // Constructor now takes reference to shared symbol table
-Lexer::Lexer(const std::string &src, SymbolTable& symbols) 
-    : source(src), symbolTable(symbols) {}
+Lexer::Lexer(const std::string &src, SymbolTable& symbols, ErrorHandler& errors) 
+    : source(src), symbolTable(symbols), errorHandler(errors) {}
+
 
 
 
@@ -100,11 +101,6 @@ void Lexer::identifier() {
     std::string word = source.substr(start, pos - start);
 
     TokenType type = keywordType(word);
-    // if (type == TokenType::IDENTIFIER) {
-    //     // Phase 1: Lexical Analysis - Create new table entries for identifiers
-    //     symbolTable.declareIdentifier(word, line);
-    // }
-
     addToken(type, word);
 }
 
@@ -131,7 +127,13 @@ void Lexer::stringLiteral() {
         if (peek() == '\n') { line++; column = 1; }
         advance();
     }
-    if (isAtEnd()) throw std::runtime_error("Unterminated string");
+    if (isAtEnd()) {
+        errorHandler.reportError(ErrorCategory::LEXICAL, 
+            "Unterminated string literal", line, column - 1,
+            "parsing string literal");
+        errorHandler.addSuggestion("Add closing quote (\") to complete the string");
+        return;  // Don't add token for unterminated string
+    }
     advance();
     std::string val = source.substr(startPos, pos - startPos - 1);
     addToken(TokenType::STRING_LITERAL, val);
@@ -142,11 +144,16 @@ void Lexer::stringLiteral() {
 void Lexer::charLiteral() {
     char c = advance();
     if (c == '\\') advance();
-    if (peek() != '\'') throw std::runtime_error("Unterminated char literal");
+    if (peek() != '\'') {
+        errorHandler.reportError(ErrorCategory::LEXICAL,
+            "Unterminated character literal", line, column,
+            "parsing character literal");
+        errorHandler.addSuggestion("Add closing single quote (') to complete the character");
+        return; // Don't add token for unterminated char
+    }
     advance();
     addToken(TokenType::CHAR_LITERAL, std::string(1, c));
 }
-
 
 // Lexes a symbol or operator token
 void Lexer::symbol() {
@@ -212,14 +219,21 @@ std::vector<Token> Lexer::tokenize() {
     while (!isAtEnd()) {
         skipWhitespace();
         if (isAtEnd()) break;
+        
         char c = peek();
         if (std::isalpha(c) || c == '_') { advance(); identifier(); }
         else if (std::isdigit(c)) { advance(); number(); }
         else if (c == '"') { advance(); stringLiteral(); }
         else if (c == '\'') { advance(); charLiteral(); }
         else { symbol(); }
+        
+        // Check if we hit error limit
+        if (errorHandler.getErrorCount() > 10) {
+            errorHandler.reportFatal(ErrorCategory::LEXICAL, 
+                "Too many lexical errors, stopping tokenization");
+            break;
+        }
     }
     addToken(TokenType::END_OF_FILE, "");
     return tokens;
 }
-

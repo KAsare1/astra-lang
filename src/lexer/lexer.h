@@ -3,17 +3,19 @@
 #include <vector>
 #include "token.h"
 #include "../shared/symbol_table.h"
+#include "../shared/error_handler.h"
 
 class Lexer {
 public:
-    Lexer(const std::string &src, SymbolTable& symbols);  // Updated constructor
+    Lexer(const std::string &src, SymbolTable& symbols, ErrorHandler& errors);
     std::vector<Token> tokenize();
-    void enterScope(); // Manage SymbolTable scope
-    void exitScope(); // Manage SymbolTable scope
-    
+    void enterScope(); 
+    void exitScope(); 
+
 private:
     const std::string &source;
-    SymbolTable& symbolTable;  // Reference to shared symbol table
+    SymbolTable& symbolTable; 
+    ErrorHandler& errorHandler;
     size_t pos = 0;
     int line = 1;
     int column = 1;

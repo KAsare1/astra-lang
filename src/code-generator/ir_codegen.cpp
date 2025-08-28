@@ -1,12 +1,13 @@
 #include "ir_codegen.h"
 #include <stdexcept>
 #include <cstdlib>
+#include "../shared/error_handler.h"
 
 // ===== IRCodegen =====
 
-IRCodegen::IRCodegen(const std::string& moduleName, SymbolTable& syms)
+IRCodegen::IRCodegen(const std::string& moduleName, SymbolTable& syms, ErrorHandler& errors)
     : module(std::make_unique<llvm::Module>(moduleName, context)),
-      builder(context), symbolTable(syms) {}
+      builder(context), symbolTable(syms), errorHandler(errors) {}
 
 // Create: define i32 @main()
 llvm::Function* IRCodegen::createMain() {
@@ -76,6 +77,8 @@ llvm::Type* IRCodegen::inferType(const Expr* expr) {
 
 // Builtin print overload resolution by argument type
 llvm::Value* IRCodegen::ensurePrintCall(llvm::Value* arg) {
+    if (!arg) return nullptr;  // Handle null arguments
+    
     auto *ty = arg->getType();
     llvm::Function* callee = nullptr;
 
@@ -89,9 +92,13 @@ llvm::Value* IRCodegen::ensurePrintCall(llvm::Value* arg) {
         callee = getOrCreatePrintString();
         return builder.CreateCall(callee, {arg});
     } else {
-        throw std::runtime_error("print: unsupported argument type in IR codegen");
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "print: unsupported argument type in IR codegen",
+            0, 0, "generating print call");
+        return nullptr;
     }
 }
+
 
 // declare void @print_i64(i64)
 llvm::Function* IRCodegen::getOrCreatePrintInt() {
@@ -127,7 +134,9 @@ void IRCodegen::emit(const std::vector<std::unique_ptr<Stmt>>& statements) {
 
     // Emit each statement into main
     for (const auto& s : statements) {
-        genStmt(s.get());
+        if (s) {  // Only emit non-null statements
+            genStmt(s.get());
+        }
     }
 
     // Return 0 from main
@@ -135,10 +144,16 @@ void IRCodegen::emit(const std::vector<std::unique_ptr<Stmt>>& statements) {
 
     // Verify the module & main
     if (llvm::verifyFunction(*mainFn, &llvm::errs())) {
-        throw std::runtime_error("IR verification failed for main()");
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "IR verification failed for main()",
+            0, 0, "verifying generated code");
+        return;
     }
     if (llvm::verifyModule(*module, &llvm::errs())) {
-        throw std::runtime_error("IR verification failed for module");
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "IR verification failed for module",
+            0, 0, "verifying generated code");
+        return;
     }
 }
 
@@ -153,29 +168,36 @@ void IRCodegen::genStmt(const Stmt* stmt) {
         genExprStmt(e);
         return;
     }
-    throw std::runtime_error("Unknown statement in IR codegen");
+    
+    errorHandler.reportError(ErrorCategory::CODEGEN,
+        "Unknown statement type in IR generation",
+        0, 0, "generating statement");
 }
 
 void IRCodegen::genVarDecl(const VarDeclStmt* v) {
-    // Phase 4: Use symbol table type information instead of inference
+    // Phase 4: Use symbol table type information
     llvm::Type* ty = getTypeFromSymbolTable(v->name);
 
-    // allocate in entry block
     auto *alloca = createEntryAlloca(currentFunction, ty, v->name);
 
-    // store initializer if present
     if (v->initializer) {
         llvm::Value* init = genExpr(v->initializer.get());
+        if (!init) {
+            // Expression generation failed, skip this variable
+            return;
+        }
         
         // Type checking using symbol table information
-        Symbol* symbol = symbolTable.getSymbol(v->name);
-        if (symbol && init->getType() != ty) {
-            throw std::runtime_error("Initializer type does not match declared variable type for: " + v->name);
+        if (init->getType() != ty) {
+            errorHandler.reportError(ErrorCategory::CODEGEN,
+                "Initializer type does not match declared variable type for: " + v->name,
+                0, 0, "generating variable declaration");
+            return;
         }
         
         builder.CreateStore(init, alloca);
     } else {
-        // default-init to 0 / null based on type from symbol table
+        // default-init based on type
         if (ty->isIntegerTy()) {
             builder.CreateStore(llvm::ConstantInt::get(ty, 0), alloca);
         } else if (ty->isDoubleTy()) {
@@ -185,7 +207,7 @@ void IRCodegen::genVarDecl(const VarDeclStmt* v) {
         }
     }
 
-    namedValues[v->name] = alloca;  // register local mapping for LLVM
+    namedValues[v->name] = alloca;
 }
 
 void IRCodegen::genExprStmt(const ExprStmt* s) {
@@ -195,11 +217,17 @@ void IRCodegen::genExprStmt(const ExprStmt* s) {
 // ===== Expressions =====
 
 llvm::Value* IRCodegen::genExpr(const Expr* expr) {
+    if (!expr) return nullptr;  // Handle null expressions
+    
     if (auto L = dynamic_cast<const LiteralExpr*>(expr))  return genLiteral(L);
     if (auto V = dynamic_cast<const VariableExpr*>(expr)) return genVariable(V);
     if (auto B = dynamic_cast<const BinaryExpr*>(expr))   return genBinary(B);
     if (auto C = dynamic_cast<const CallExpr*>(expr))     return genCall(C);
-    throw std::runtime_error("Unknown expression in IR codegen");
+    
+    errorHandler.reportError(ErrorCategory::CODEGEN,
+        "Unknown expression type in IR generation",
+        0, 0, "generating expression");
+    return nullptr;
 }
 
 llvm::Value* IRCodegen::genLiteral(const LiteralExpr* lit) {
@@ -225,14 +253,19 @@ llvm::Value* IRCodegen::genLiteral(const LiteralExpr* lit) {
 }
 
 llvm::Value* IRCodegen::genVariable(const VariableExpr* var) {
-    // Phase 4: Use symbol table information
     if (!symbolTable.isDeclared(var->name)) {
-        throw std::runtime_error("IR: use of undeclared variable '" + var->name + "'");
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "Use of undeclared variable '" + var->name + "'",
+            0, 0, "generating variable reference");
+        return nullptr;
     }
     
     auto it = namedValues.find(var->name);
     if (it == namedValues.end()) {
-        throw std::runtime_error("IR: variable not allocated: " + var->name);
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "Variable not allocated: " + var->name,
+            0, 0, "generating variable reference");
+        return nullptr;
     }
     
     auto *alloca = it->second;
@@ -242,30 +275,43 @@ llvm::Value* IRCodegen::genVariable(const VariableExpr* var) {
 }
 
 llvm::Value* IRCodegen::genBinary(const BinaryExpr* /*bin*/) {
-    // Not implemented yet (your language doesn't parse binary ops yet).
-    throw std::runtime_error("Binary expressions are not supported in IR generation (yet).");
+    errorHandler.reportError(ErrorCategory::CODEGEN,
+        "Binary expressions are not supported in IR generation yet",
+        0, 0, "generating binary expression");
+    errorHandler.addSuggestion("Binary operations will be implemented in a future version");
+    return nullptr;
 }
 
 llvm::Value* IRCodegen::genCall(const CallExpr* call) {
-    // For now, support 'print' as a builtin with simple overloads
     if (call->callee == "print") {
         if (call->arguments.size() != 1) {
-            throw std::runtime_error("print() expects exactly one argument.");
+            errorHandler.reportError(ErrorCategory::CODEGEN,
+                "print() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                0, 0, "generating print call");
+            return nullptr;
         }
         llvm::Value* argV = genExpr(call->arguments[0].get());
-        return ensurePrintCall(argV); // returns void (Value* is CallInst), ignored by ExprStmt
+        if (!argV) return nullptr;  // Argument generation failed
+        return ensurePrintCall(argV);
     }
 
-    // If you later add user functions, look them up:
+    // User-defined functions
     llvm::Function* calleeFn = module->getFunction(call->callee);
     if (!calleeFn) {
-        throw std::runtime_error("Call to unknown function: " + call->callee);
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "Call to unknown function: " + call->callee,
+            0, 0, "generating function call");
+        return nullptr;
     }
 
     std::vector<llvm::Value*> args;
     args.reserve(call->arguments.size());
+    
     for (auto &a : call->arguments) {
-        args.push_back(genExpr(a.get()));
+        llvm::Value* arg = genExpr(a.get());
+        if (!arg) return nullptr;  // Argument generation failed
+        args.push_back(arg);
     }
+    
     return builder.CreateCall(calleeFn, args);
 }
