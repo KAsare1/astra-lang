@@ -1,185 +1,370 @@
-# astra-lang Language Specification
+# Astra-lang Compiler
 
 ## Overview
-**Astra** is a new programming language currently under active development.
-This document describes the *current syntax* as supported by the lexer and parser at this stage of the project.
+**Astra** is a modern programming language compiler built with LLVM. The project demonstrates a complete compilation pipeline from lexical analysis through native code generation, featuring professional error handling, comprehensive symbol table management, and extensible architecture.
 
-*> ⚠ ***Note***: The grammar is minimal and will expand over time as the compiler gains more features.*
+## Current Implementation Status
+
+###  Fully Implemented Features
+- **Complete Compilation Pipeline**: Source code → Tokens → AST → Semantic Analysis → LLVM IR → Native Assembly → Executable
+- **Professional Error Handling**: Context-aware error messages with line numbers, suggestions, and recovery
+- **Shared Symbol Table**: Consistent symbol management across all compiler phases
+- **LLVM Integration**: Full IR generation and native code output
+- **Type System Foundation**: Basic type inference for integers, floats, and strings
+- **Built-in Functions**: Polymorphic `print()` function with type-specific implementations
+
+### Current Language Capabilities
+```astra
+let x = 42;
+let pi = 3.14;
+let message = "Hello, World!";
+print(x);
+print(pi);
+print(message);
+```
 
 ---
 
-## Project Structure
+## Project Architecture
+
 ```
-├── build/ # Build directory (CMake/Make artifacts)
-│ ├── lexer/ # Lexer build artifacts
-│ ├── parser/ # Parser build artifacts
-│ └── main.o
-├── astra # Final compiled executable (CMake)
-├── compiler # Final compiled executable (Make)
-├── examples/ # Example Astra programs
-├── CMakeLists.txt # CMake build configuration
-├── Makefile # Make build automation
+astra-cc/
+├── build/                    # Build artifacts and output files
+│   ├── output.ll            # Generated LLVM IR
+│   ├── output.s             # Generated assembly
+│   ├── output.o             # Generated object file
+│   └── runtime.o            # Runtime library
 ├── src/
-│ ├── abstract-syntax-tree/ # AST node definitions
-│ ├── code-generator/ # Code generation
-│ ├── lexer/ # Lexer implementation
-│ ├── parser/ # Parser implementation
-│ ├── semantic/ # (Planned) Semantic analysis
-│ └── main.cpp # Compiler entry point
-└── tests/
-    └── astra.acc # Test program
+│   ├── shared/              # Shared components
+│   │   ├── symbol_table.h   # Symbol table with scope management
+│   │   └── error_handler.h  # Professional error reporting
+│   ├── lexer/               # Lexical analysis
+│   │   ├── lexer.h/.cpp     # Tokenizer implementation
+│   │   ├── token.h          # Token definitions
+│   │   └── keywords.h       # Language keywords
+│   ├── parser/              # Syntax analysis
+│   │   ├── parser.h/.cpp    # Parser with error recovery
+│   │   └── ast.h            # AST node definitions
+│   ├── semantic/            # Semantic analysis
+│   │   └── semantic_analyzer.h # Type checking and validation
+│   ├── code-generator/      # Code generation
+│   │   ├── ir_codegen.h/.cpp    # LLVM IR generation
+│   │   ├── target/              # Target-specific code
+│   │   └── runtime.c            # Runtime support functions
+│   └── main.cpp             # Compiler driver
+├── tests/
+│   └── astra.acc            # Test programs
+├── CMakeLists.txt           # CMake configuration
+└── Makefile                 # Alternative build system
 ```
 
 ## Building the Compiler
 
-The project supports both **CMake** and **Make** build systems.
+### Prerequisites
+- **LLVM 15+** with development headers
+- **CMake 3.16+** or **Make**
+- **GCC/Clang** with C++17 support
 
-### Option 1: CMake (Recommended)
-
-CMake provides better dependency management and cross-platform support:
-
+### Installation (macOS with Homebrew)
 ```bash
-# Configure the build (only needed once or when CMakeLists.txt changes)
-cmake -B build
-
-# Build the compiler
-cmake --build build
-
-# The executable will be created as ./build/astra
+brew install llvm cmake
 ```
 
-To clean and rebuild:
+### Build Options
+
+#### Option 1: CMake (Recommended)
 ```bash
-# Clean build directory
-rm -rf build
-
-# Reconfigure and build
-cmake -B build
-cmake --build build
-```
-
-### Option 2: Traditional Make
-
-This will produce the compiler executable as `./compiler` in the root directory:
-
-```bash
+# Configure and build
+mkdir build && cd build
+cmake ..
 make
-```
 
-To clean and rebuild:
-```bash
-make clean && make
-```
-
-## Running the Compiler on Sample Code
-
-### With CMake build:
-```bash
-./build/astra tests/astra.acc
-```
-
-### With Make build:
-```bash
-./compiler tests/astra.acc
-```
-
-## Modifying the Compiler
-
-The compiler is modular, so changes are split into different folders:
-
-**Lexer (src/lexer/)**
-Handles breaking source code into tokens.
-Edit lexer.cpp and keywords.h if you want to add new keywords or symbols.
-
-**Parser (src/parser/)**
-Converts tokens into an Abstract Syntax Tree (AST).
-Modify parser.cpp and parser.h to support new grammar rules.
-
-**Abstract Syntax Tree (src/abstract-syntax-tree/)**
-Data structures representing the parsed code.
-Update ast.h and ast_printer.h when adding new node types.
-
-**Semantic Analysis (src/semantic/)**
-(Planned) This stage will handle type checking and scope validation.
-
-**Code Generator (src/code-generator/)**
-Converts AST into executable code or bytecode using LLVM.
-
-After making changes, rebuild the compiler:
-
-### With CMake:
-```bash
+# Or use the simplified commands:
+cmake -B build
 cmake --build build
 ```
 
-### With Make:
+#### Option 2: Traditional Make
 ```bash
 make clean && make
 ```
 
----
+### Running the Compiler
+```bash
+# With CMake build
+./build/astra tests/astra.acc
 
-## Grammar
-The syntax is described in **EBNF** form:
-```
-program ::= { declaration } EOF
-declaration ::= var_declaration
-             | statement
-var_declaration ::= "let" IDENTIFIER [ "=" expression ]
-statement ::= expression_statement
-expression_statement ::= expression
-expression ::= primary
-primary ::= literal
-          | IDENTIFIER
-literal ::= INT_LITERAL
-          | FLOAT_LITERAL
-          | STRING_LITERAL
+# With Make build  
+./astra tests/astra.acc
 ```
 
----
+### Complete Compilation Process
+```bash
+# 1. Compile Astra source to object file
+./astra program.astra
 
-## Tokens
+# 2. Link with runtime to create executable
+gcc -c src/code-generator/runtime.c -o build/runtime.o
+gcc build/output.o build/runtime.o -o my_program
 
-### Keywords
-```
-let
-```
-
-### Literals
-* **Integer literals** — e.g., `42`, `100`
-* **Float literals** — e.g., `3.14`, `0.5`
-* **String literals** — `"hello"`
-
-### Identifiers
-* Names for variables and functions: must start with a letter or underscore, followed by letters, digits, or underscores.
-
-### Symbols
-```
-= ( )
+# 3. Run your program
+./my_program
 ```
 
 ---
 
-## Example Code
-```astra
-let x = 42
-print(x)
+## Compiler Architecture Deep Dive
+
+### Phase 1: Lexical Analysis (`src/lexer/`)
+- **Tokenizes** source code into meaningful symbols
+- **Tracks** line/column information for error reporting
+- **Handles** string literals, numbers, identifiers, and keywords
+- **Reports** lexical errors (unterminated strings, invalid characters)
+
+### Phase 2: Syntax Analysis (`src/parser/`)
+- **Builds** Abstract Syntax Tree from token stream
+- **Implements** recursive descent parsing with error recovery
+- **Manages** symbol declarations and scope validation
+- **Provides** synchronization points for multiple error reporting
+
+### Phase 3: Semantic Analysis (`src/semantic/`)
+- **Performs** type inference and checking
+- **Validates** variable usage and function calls
+- **Detects** unused variables and uninitialized usage
+- **Maintains** symbol table with type information
+
+### Phase 4: Code Generation (`src/code-generator/`)
+- **Generates** LLVM IR from AST
+- **Produces** native assembly and object code
+- **Links** with runtime library for built-in functions
+- **Optimizes** through LLVM's optimization passes
+
+### Shared Components (`src/shared/`)
+- **Symbol Table**: Multi-scope symbol management with type tracking
+- **Error Handler**: Professional error reporting with context and suggestions
+
+---
+
+## Adding New Language Features
+
+### 1. Adding New Operators (e.g., Arithmetic)
+
+#### Step 1: Update Lexer
+```cpp
+// In lexer/keywords.h - add new token types
+enum class TokenType {
+    // ... existing tokens ...
+    PLUS, MINUS, MULTIPLY, DIVIDE
+};
+
+// In lexer/lexer.cpp - recognize new symbols
+void Lexer::symbol() {
+    char c = advance();
+    switch (c) {
+        case '+': addToken(TokenType::PLUS, "+"); break;
+        case '-': addToken(TokenType::MINUS, "-"); break;
+        // ... etc
+    }
+}
 ```
+
+#### Step 2: Update AST
+```cpp
+// In abstract-syntax-tree/ast.h
+struct BinaryExpr : Expr {
+    std::unique_ptr<Expr> left;
+    std::string op;
+    std::unique_ptr<Expr> right;
+    // ... constructor
+};
+```
+
+#### Step 3: Update Parser
+```cpp
+// In parser/parser.cpp - add precedence parsing
+std::unique_ptr<Expr> Parser::expression() {
+    return additive();
+}
+
+std::unique_ptr<Expr> Parser::additive() {
+    auto expr = multiplicative();
+    while (match({TokenType::PLUS, TokenType::MINUS})) {
+        std::string op = previous().lexeme;
+        auto right = multiplicative();
+        expr = std::make_unique<BinaryExpr>(std::move(expr), op, std::move(right));
+    }
+    return expr;
+}
+```
+
+#### Step 4: Update Semantic Analyzer
+```cpp
+// In semantic/semantic_analyzer.h
+std::string analyzeExpr(const Expr* expr) {
+    // ... existing cases ...
+    else if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {
+        std::string leftType = analyzeExpr(binary->left.get());
+        std::string rightType = analyzeExpr(binary->right.get());
+        
+        if (leftType != rightType) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Type mismatch in binary expression");
+            return "error";
+        }
+        return leftType;
+    }
+}
+```
+
+#### Step 5: Update Code Generator
+```cpp
+// In code-generator/ir_codegen.cpp
+llvm::Value* IRCodegen::genBinary(const BinaryExpr* bin) {
+    llvm::Value* left = genExpr(bin->left.get());
+    llvm::Value* right = genExpr(bin->right.get());
+    
+    if (bin->op == "+") {
+        if (left->getType()->isIntegerTy()) {
+            return builder.CreateAdd(left, right, "addtmp");
+        } else if (left->getType()->isDoubleTy()) {
+            return builder.CreateFAdd(left, right, "addtmp");
+        }
+    }
+    // ... handle other operators
+}
+```
+
+### 2. Adding Control Flow (e.g., If Statements)
+
+#### Follow the same pattern:
+1. **Add tokens** for `if`, `else`, `{`, `}`
+2. **Create AST nodes** for `IfStmt`  
+3. **Parse** control flow syntax
+4. **Validate** condition types in semantic analysis
+5. **Generate** conditional branches in LLVM IR
+
+### 3. Adding Functions
+
+This requires more extensive changes:
+1. **Function declaration parsing**
+2. **Parameter and return type handling**
+3. **Call stack management**
+4. **LLVM function generation**
+
+---
+
+## Error Handling System
+
+The compiler features professional error handling with:
+
+### Error Categories
+- **Lexical**: Tokenization errors (unterminated strings)
+- **Syntax**: Parsing errors (missing semicolons)
+- **Semantic**: Type and scope errors (undeclared variables)
+- **Codegen**: IR generation errors
+
+### Error Recovery
+- Parser continues after errors to find multiple issues
+- Synchronization points prevent cascading errors
+- Null checks prevent crashes from malformed AST
+
+### Example Output
+```
+program.astra:5:12: error: [semantic] Use of undeclared variable 'undeclared_var'
+    print(undeclared_var);
+           ^
+  suggestion: Check the variable name for typos
+
+program.astra:8:9: warning: [semantic] Variable 'unused' declared but never used
+  suggestion: Remove the unused variable or use it in your code
+
+Compilation failed with 1 error(s) and 1 warning(s)
+```
+
+---
+
+## Testing Your Changes
+
+### Create Test Files
+```bash
+# Create a test program
+echo 'let x = 42; print(x);' > test.astra
+
+# Test the full pipeline
+./astra test.astra
+gcc -c src/code-generator/runtime.c -o build/runtime.o
+gcc build/output.o build/runtime.o -o test_program
+./test_program
+```
+
+### Debug Output
+The compiler provides detailed phase-by-phase output:
+- Token counts from lexer
+- Statement counts from parser  
+- Symbol table state after semantic analysis
+- Generated file locations
+
+---
+
+## Contributing Guidelines
+
+### Code Style
+- Use modern C++17 features
+- Follow RAII principles
+- Prefer smart pointers over raw pointers
+- Include comprehensive error checking
+
+### Adding Features
+1. **Design** the feature syntax and semantics
+2. **Update** all relevant compiler phases
+3. **Add** comprehensive error handling
+4. **Test** with both valid and invalid code
+5. **Document** the new functionality
+
+### Common Pitfalls
+- **Symbol table consistency**: Ensure all phases use the shared symbol table
+- **Error propagation**: Handle null AST nodes from parsing errors
+- **LLVM type matching**: Verify type consistency in IR generation
+- **Memory management**: Use RAII and smart pointers consistently
+
+---
 
 ## Current Limitations
-* No operators or complex expressions yet (binary expressions not parsed).
-* No control flow statements.
-* No functions, structs, or imports yet.
-* No type annotations.
-* Only single-assignment variable declarations are supported.
+
+### Language Features Not Yet Implemented
+- Arithmetic and logical operators
+- Control flow (if/else, loops)
+- Function definitions
+- User-defined types/structs
+- Arrays and collections
+- Module system
+
+### Known Issues
+- Binary expressions parsing is stubbed out
+- Limited type system (no user-defined types)
+- No optimization passes enabled
+- Runtime library is minimal
 
 ---
 
-## Next Steps
-Planned future syntax features:
-* Arithmetic and logical operators
-* Function definitions and calls
-* Conditional and loop constructs
-* Structs and custom types
-* Type inference and annotations
-* Pattern matching
+## Future Roadmap
+
+### Short Term
+- [ ] Arithmetic operators (+, -, *, /)
+- [ ] Boolean operators (&&, ||, !)
+- [ ] Comparison operators (==, !=, <, >)
+- [ ] Control flow (if/else, while)
+
+### Medium Term  
+- [ ] Function definitions and calls
+- [ ] Arrays and basic collections
+- [ ] Struct types
+- [ ] Pattern matching
+
+### Long Term
+- [ ] Memory management features
+- [ ] Concurrency primitives  
+- [ ] Module system
+- [ ] Standard library
+
+The compiler architecture is designed to support these extensions naturally through the existing phase structure and symbol table system.
