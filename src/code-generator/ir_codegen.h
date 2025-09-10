@@ -5,7 +5,7 @@
 #include <vector>
 #include "../abstract-syntax-tree/ast.h"
 #include "../shared/symbol_table.h"
-#include "../shared/error_handler.h"  // Fixed include path
+#include "../shared/error_handler.h"
 
 // LLVM headers
 #include "llvm/IR/IRBuilder.h"
@@ -42,7 +42,7 @@ private:
     // Current function (only 'main' for now)
     llvm::Function* currentFunction = nullptr;
 
-    // Local variable storage (name -> alloca) - still needed for LLVM specifics
+    // Local variable storage (name -> alloca)
     std::unordered_map<std::string, llvm::AllocaInst*> namedValues;
 
     // === Helpers ===
@@ -53,8 +53,7 @@ private:
     llvm::Function* getOrCreatePrintInt();
     llvm::Function* getOrCreatePrintDouble();
     llvm::Function* getOrCreatePrintString();
-
-    // New methods for symbol table integration
+    llvm::Value* createCondition(llvm::Value* value);
     llvm::Type* getTypeFromSymbolTable(const std::string& name);
     llvm::Type* stringToLLVMType(const std::string& typeStr);
 
@@ -62,10 +61,17 @@ private:
     void genStmt(const Stmt* stmt);
     void genVarDecl(const VarDeclStmt* v);
     void genExprStmt(const ExprStmt* s);
+    void genAssignmentStmt(const AssignmentStmt* assignStmt);
+    void genBlockStmt(const BlockStmt* block);
+    void genIfStmt(const IfStmt* ifStmt);
+    void genWhileStmt(const WhileStmt* whileStmt);
+    void genForStmt(const ForStmt* forStmt);  // NEW: For loop code generation
+
 
     llvm::Value* genExpr(const Expr* expr);
     llvm::Value* genLiteral(const LiteralExpr* lit);
     llvm::Value* genVariable(const VariableExpr* var);
-    llvm::Value* genBinary(const BinaryExpr* bin);   // placeholder; not used yet
+    llvm::Value* genUnary(const UnaryExpr* unary);
+    llvm::Value* genBinary(const BinaryExpr* bin);
     llvm::Value* genCall(const CallExpr* call);
 };

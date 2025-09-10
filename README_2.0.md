@@ -368,3 +368,35 @@ The compiler provides detailed phase-by-phase output:
 - [ ] Standard library
 
 The compiler architecture is designed to support these extensions naturally through the existing phase structure and symbol table system.
+
+
+
+
+
+Recommended Implementation Order
+Phase 1: Control Flow (Weeks 1-2)
+
+Block statements with proper scoping
+If/else statements
+While loops
+Break/continue (if desired)
+
+Phase 2: Functions (Weeks 3-4)
+
+Function definitions with parameters and return types
+Return statements
+Function calls with argument type checking
+Local variable scoping within functions
+
+Phase 3: Data Structures (Weeks 5-6)
+
+Arrays with literal syntax and indexing
+Enhanced string operations
+Basic built-in functions (len, etc.)
+
+Phase 4: Advanced Features (Weeks 7+)
+
+Structures/records
+Type annotations
+Pattern matching (if desired)
+Standard library expansion

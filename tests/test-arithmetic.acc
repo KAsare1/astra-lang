@@ -1,0 +1,59 @@
+// Comprehensive arithmetic operations test for Astra compiler
+// Testing all implemented operators with proper precedence
+
+// Basic integer arithmetic
+let a = 10;
+let b = 5;
+let c = 2;
+
+// Addition and subtraction
+let sum = a + b;
+let diff = a - b;
+print(sum);
+print(diff);
+
+// Multiplication and division
+let prod = a * b;
+let quot = a / b;
+print(prod);
+print(quot);
+
+// Modulo operation
+let mod = a % c;
+print(mod);
+
+// Test operator precedence
+let precedence1 = c + c * b;
+print(precedence1);
+
+// Test parentheses
+let precedence2 = (c + c) * b;
+print(precedence2);
+
+// Unary minus
+let negative = -a;
+print(negative);
+
+// Floating point arithmetic
+let x = 3.5;
+let y = 1.5;
+let fsum = x + y;
+let fdiff = x - y;
+print(fsum);
+print(fdiff);
+
+// Comparison operations
+let greater = a > b;
+let lesser = a < b;
+let equal = a == b;
+let notequal = a != b;
+print(greater);
+print(lesser);
+print(equal);
+print(notequal);
+
+// Logical operations
+let logical_and = greater && notequal;
+let logical_or = lesser || equal;
+print(logical_and);
+print(logical_or);

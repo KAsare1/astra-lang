@@ -14,13 +14,16 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
 
+
+using namespace std;
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: astra <source_file>\n";
         return 1;
     }
 
-    // Initialize error handler first
+    // Initialize error handler firs
     ErrorHandler errorHandler;
 
     std::ifstream file(argv[1]);
@@ -49,6 +52,13 @@ int main(int argc, char** argv) {
     try {
         tokens = lexer.tokenize();
         std::cout << "Lexical analysis completed. Tokens generated: " << tokens.size() << "\n";
+        
+        // DEBUG: Print first few tokens
+        std::cout << "First 20 tokens:\n";
+        for (size_t i = 0; i < std::min(tokens.size(), size_t(20)); ++i) {
+            std::cout << "  " << tokenTypeToString(tokens[i].type) << ": '" << tokens[i].lexeme << "'\n";
+        }
+        
     } catch (const std::runtime_error& e) {
         // Lexer should have reported errors through errorHandler, but catch any that slip through
         if (!errorHandler.hasErrorsOccurred()) {
@@ -71,6 +81,14 @@ int main(int argc, char** argv) {
     try {
         statements = parser.parse();
         std::cout << "Syntax analysis completed. Parsed " << statements.size() << " statements.\n";
+        
+        // DEBUG: Print AST
+        std::cout << "\n=== AST STRUCTURE ===\n";
+        for (size_t i = 0; i < statements.size(); ++i) {
+            std::cout << "Statement " << i << ":\n";
+            printStmt(statements[i].get(), 1);
+        }
+        
     } catch (const std::runtime_error& e) {
         // Parser should have reported errors through errorHandler
         if (!errorHandler.hasErrorsOccurred()) {

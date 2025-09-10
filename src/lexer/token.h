@@ -1,15 +1,19 @@
 #pragma once
 #include <string>
 
-
-
 // Enum for all possible token types
 enum class TokenType {
     // Keywords
     KW_LET, KW_FN, KW_STRUCT, KW_COPY, KW_UNIQUE, KW_SHARED, KW_REF, KW_MUTREF,
     KW_MATCH, KW_CASE, KW_UNSAFE, KW_EXTERN, KW_DROP, KW_RETURN, KW_DEFER, KW_SPAWN,
+    
+    // Control flow keywords
+    KW_IF, KW_ELSE, KW_WHILE, KW_FOR, KW_BREAK, KW_CONTINUE, KW_TRUE, KW_FALSE,
+    KW_IN,  // NEW: for range-based for loops
+    
     // Identifiers and literals
     IDENTIFIER, INT_LITERAL, FLOAT_LITERAL, STRING_LITERAL, CHAR_LITERAL, NUMBER_LITERAL,
+    
     // Symbols
     PLUS, MINUS, STAR, SLASH, PERCENT, ASSIGN, EQ, NEQ, LT, LTE, GT, GTE,
     AND_AND, OR_OR, AMP, AMP_MUT, BANG, DOT, COMMA, COLON, SEMICOLON,
@@ -18,7 +22,6 @@ enum class TokenType {
     // Special
     END_OF_FILE, UNKNOWN
 };
-
 
 // Token structure
 struct Token {
@@ -31,8 +34,6 @@ struct Token {
     Token(TokenType t, const std::string &l, int ln, int col)
         : type(t), lexeme(l), line(ln), column(col) {}
 };
-
-
 
 inline const char* tokenTypeToString(TokenType type) {
     switch (type) {
@@ -53,6 +54,17 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::KW_RETURN:   return "KW_RETURN";
         case TokenType::KW_DEFER:    return "KW_DEFER";
         case TokenType::KW_SPAWN:    return "KW_SPAWN";
+        
+        // Control flow keywords
+        case TokenType::KW_IF:       return "KW_IF";
+        case TokenType::KW_ELSE:     return "KW_ELSE";
+        case TokenType::KW_WHILE:    return "KW_WHILE";
+        case TokenType::KW_FOR:      return "KW_FOR";
+        case TokenType::KW_BREAK:    return "KW_BREAK";
+        case TokenType::KW_CONTINUE: return "KW_CONTINUE";
+        case TokenType::KW_TRUE:     return "KW_TRUE";
+        case TokenType::KW_FALSE:    return "KW_FALSE";
+        case TokenType::KW_IN:       return "KW_IN";
 
         // Identifiers and literals
         case TokenType::IDENTIFIER:      return "IDENTIFIER";
@@ -102,4 +114,3 @@ inline const char* tokenTypeToString(TokenType type) {
         default: return "UNKNOWN";
     }
 }
-
