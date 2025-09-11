@@ -1,7 +1,8 @@
 #include "semantic_analyzer.h"
 
 SemanticAnalyzer::SemanticAnalyzer(SymbolTable& symbolTable, ErrorHandler& errors) 
-    : symbols(symbolTable), errorHandler(errors), currentLine(0) {
+    : symbols(symbolTable), errorHandler(errors), currentLine(0),
+      currentFunctionName(""), currentFunctionReturnType(""), inFunctionBody(false) {
     initializeBuiltins();
 }
 
@@ -34,11 +35,9 @@ void SemanticAnalyzer::analyzeStmt(const Stmt* stmt) {
     else if (auto exprStmt = dynamic_cast<const ExprStmt*>(stmt)) {
         analyzeExpr(exprStmt->expression.get());
     }
-    // Handle assignment statements
     else if (auto assignStmt = dynamic_cast<const AssignmentStmt*>(stmt)) {
         handleAssignmentStmt(assignStmt);
     }
-    // Handle control flow statements
     else if (auto blockStmt = dynamic_cast<const BlockStmt*>(stmt)) {
         handleBlockStmt(blockStmt);
     }
@@ -48,9 +47,15 @@ void SemanticAnalyzer::analyzeStmt(const Stmt* stmt) {
     else if (auto whileStmt = dynamic_cast<const WhileStmt*>(stmt)) {
         handleWhileStmt(whileStmt);
     }
-    // NEW: Handle for statements
     else if (auto forStmt = dynamic_cast<const ForStmt*>(stmt)) {
         handleForStmt(forStmt);
+    }
+    // ADD THESE TWO CASES:
+    else if (auto funcDecl = dynamic_cast<const FunctionDeclStmt*>(stmt)) {
+        handleFunctionDecl(funcDecl);
+    }
+    else if (auto retStmt = dynamic_cast<const ReturnStmt*>(stmt)) {
+        handleReturnStmt(retStmt);
     }
     else {
         errorHandler.reportError(ErrorCategory::SEMANTIC,
@@ -137,45 +142,40 @@ void SemanticAnalyzer::handleBlockStmt(const BlockStmt* blockStmt) {
 }
 
 void SemanticAnalyzer::handleIfStmt(const IfStmt* ifStmt) {
-    // Analyze condition
     std::string conditionType = analyzeExpr(ifStmt->condition.get());
     
     if (conditionType != "error") {
-        // Check that condition is boolean-convertible (numeric types)
-        if (conditionType != "int" && conditionType != "double") {
+        // UPDATED: Accept bool, int, and double for conditions
+        if (conditionType != "int" && conditionType != "double" && conditionType != "bool") {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
-                "If condition must be boolean-convertible (numeric), got '" + conditionType + "'",
+                "If condition must be boolean-convertible (numeric or bool), got '" + conditionType + "'",
                 currentLine, 0, "analyzing if statement");
-            errorHandler.addSuggestion("Use a comparison expression like 'x > 0' or 'x == value'");
+            errorHandler.addSuggestion("Use a comparison expression like 'x > 0' or a boolean variable");
         }
     }
     
-    // Analyze then branch
     if (ifStmt->thenBranch) {
         analyzeStmt(ifStmt->thenBranch.get());
     }
     
-    // Analyze else branch if present
     if (ifStmt->elseBranch) {
         analyzeStmt(ifStmt->elseBranch.get());
     }
 }
 
 void SemanticAnalyzer::handleWhileStmt(const WhileStmt* whileStmt) {
-    // Analyze condition
     std::string conditionType = analyzeExpr(whileStmt->condition.get());
     
     if (conditionType != "error") {
-        // Check that condition is boolean-convertible (numeric types)
-        if (conditionType != "int" && conditionType != "double") {
+        // UPDATED: Accept bool, int, and double for conditions
+        if (conditionType != "int" && conditionType != "double" && conditionType != "bool") {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
-                "While condition must be boolean-convertible (numeric), got '" + conditionType + "'",
+                "While condition must be boolean-convertible (numeric or bool), got '" + conditionType + "'",
                 currentLine, 0, "analyzing while statement");
-            errorHandler.addSuggestion("Use a comparison expression like 'i < 10' or 'condition != 0'");
+            errorHandler.addSuggestion("Use a comparison expression like 'i < 10' or a boolean variable");
         }
     }
     
-    // Analyze body
     if (whileStmt->body) {
         analyzeStmt(whileStmt->body.get());
     }
@@ -300,7 +300,7 @@ std::string SemanticAnalyzer::analyzeExpr(const Expr* expr) {
             }
         } else if (unary->op == "!") {
             // Logical NOT always returns boolean (represented as int)
-            return "int";
+            return "bool";
         } else {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
                 "Unknown unary operator: " + unary->op,
@@ -354,40 +354,37 @@ std::string SemanticAnalyzer::analyzeExpr(const Expr* expr) {
             }
         }
         // Comparison operators (==, !=, <, <=, >, >=)
-        else if (binary->op == "==" || binary->op == "!=" || 
-                 binary->op == "<" || binary->op == "<=" || 
-                 binary->op == ">" || binary->op == ">=") {
-            if (leftType != rightType) {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Type mismatch in comparison: '" + leftType + "' " + binary->op + " '" + rightType + "'",
-                    currentLine, 0, "analyzing binary expression");
-                errorHandler.addSuggestion("Compare values of the same type");
-                return "error";
-            }
-            
-            if (leftType == "int" || leftType == "double") {
-                return "int";  // Comparisons return boolean (represented as int)
-            } else {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Comparison operator '" + binary->op + "' requires numeric types, got '" + leftType + "'",
-                    currentLine, 0, "analyzing binary expression");
-                return "error";
-            }
-        }
+else if (binary->op == "==" || binary->op == "!=" || 
+         binary->op == "<" || binary->op == "<=" || 
+         binary->op == ">" || binary->op == ">=") {
+    if (!areTypesCompatible(leftType, rightType)) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Type mismatch in comparison: '" + leftType + "' " + binary->op + " '" + rightType + "'",
+            currentLine, 0, "analyzing binary expression");
+        return "error";
+    }
+    
+    if (leftType == "int" || leftType == "double") {
+        return "bool";  // CHANGED: Return "bool" instead of "int"
+    } else {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Comparison operator '" + binary->op + "' requires numeric types, got '" + leftType + "'",
+            currentLine, 0, "analyzing binary expression");
+        return "error";
+    }
+}
         // Logical operators (&&, ||)
-        else if (binary->op == "&&" || binary->op == "||") {
-            // For logical operators, we allow any type that can be converted to boolean
-            // In practice, this means numeric types
-            if ((leftType == "int" || leftType == "double") && 
-                (rightType == "int" || rightType == "double")) {
-                return "int";  // Logical operations return boolean (represented as int)
-            } else {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Logical operator '" + binary->op + "' requires boolean-convertible types",
-                    currentLine, 0, "analyzing binary expression");
-                return "error";
-            }
-        }
+else if (binary->op == "&&" || binary->op == "||") {
+    if ((leftType == "int" || leftType == "double" || leftType == "bool") && 
+        (rightType == "int" || rightType == "double" || rightType == "bool")) {
+        return "bool";  // CHANGED: Return "bool" instead of "int"
+    } else {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Logical operator '" + binary->op + "' requires boolean-convertible types",
+            currentLine, 0, "analyzing binary expression");
+        return "error";
+    }
+}
         else {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
                 "Unknown binary operator: " + binary->op,
@@ -422,6 +419,17 @@ std::string SemanticAnalyzer::analyzeExpr(const Expr* expr) {
             
             return "void";
         }
+        if (symbols.isFunction(call->callee)) {
+    std::string returnType = symbols.getFunctionReturnType(call->callee);
+    
+    // Analyze arguments
+    for (const auto& arg : call->arguments) {
+        std::string argType = analyzeExpr(arg.get());
+        if (argType == "error") return "error";
+    }
+    
+    return returnType;  // Returns "int", not "int(int)"
+}
         
         return symbols.getType(call->callee);
     }
@@ -487,5 +495,170 @@ void SemanticAnalyzer::checkForUnusedVariables() {
             "Variable '" + varName + "' declared but never used",
             0, 0, "checking variable usage");
         errorHandler.addSuggestion("Remove the unused variable or use it in your code");
+    }
+}
+
+
+// NEW: Check for unused functions
+void SemanticAnalyzer::checkForUnusedFunctions() {
+    auto unusedVars = symbols.getUnusedVariables();  // This also includes functions
+    for (const std::string& name : unusedVars) {
+        const Symbol* symbol = symbols.getSymbol(name);
+        if (symbol && symbol->kind == SymbolKind::FUNCTION && name != "print") {
+            errorHandler.reportWarning(ErrorCategory::SEMANTIC,
+                "Function '" + name + "' declared but never used",
+                0, 0, "checking function usage");
+            errorHandler.addSuggestion("Remove the unused function or call it in your code");
+        }
+    }
+}
+
+
+
+void SemanticAnalyzer::handleFunctionDecl(const FunctionDeclStmt* funcDecl) {
+    // Check if function already declared
+    if (symbols.isDeclaredInCurrentScope(funcDecl->name)) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Function '" + funcDecl->name + "' is already declared",
+            currentLine, 0, "declaring function");
+        return;
+    }
+    
+    // Validate function signature
+    validateFunctionSignature(funcDecl->name, funcDecl->parameters, funcDecl->returnType);
+    
+    // Declare the function
+    symbols.declare(funcDecl->name, SymbolKind::FUNCTION);
+    std::string signature = createFunctionSignature(funcDecl->parameters, funcDecl->returnType);
+    symbols.setType(funcDecl->name, signature);
+    
+    // Enter new scope for function body
+    symbols.enterScope();
+    
+    // Declare parameters in function scope
+    for (const auto& param : funcDecl->parameters) {
+        symbols.declare(param.name, SymbolKind::PARAMETER);
+        symbols.setType(param.name, param.type);
+        symbols.markInitialized(param.name);
+    }
+    
+    // Set function context
+    std::string previousFunction = currentFunctionName;
+    std::string previousReturnType = currentFunctionReturnType;
+    bool previousInFunction = inFunctionBody;
+    
+    currentFunctionName = funcDecl->name;
+    currentFunctionReturnType = funcDecl->returnType;
+    inFunctionBody = true;
+    
+    // Analyze function body
+    if (funcDecl->body) {
+        for (const auto& stmt : funcDecl->body->statements) {
+            if (stmt) {
+                analyzeStmt(stmt.get());
+            }
+        }
+    }
+    
+    // Restore previous context
+    currentFunctionName = previousFunction;
+    currentFunctionReturnType = previousReturnType;
+    inFunctionBody = previousInFunction;
+    
+    // Exit function scope
+    symbols.exitScope();
+}
+
+void SemanticAnalyzer::handleReturnStmt(const ReturnStmt* retStmt) {
+    if (!inFunctionBody) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Return statement outside of function",
+            currentLine, 0, "analyzing return statement");
+        return;
+    }
+    
+    if (retStmt->value) {
+        // Return with value
+        std::string returnValueType = analyzeExpr(retStmt->value.get());
+        if (returnValueType == "error") {
+            return;
+        }
+        
+        if (!areTypesCompatible(currentFunctionReturnType, returnValueType)) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Return type mismatch: function '" + currentFunctionName + 
+                "' expects '" + currentFunctionReturnType + "' but got '" + returnValueType + "'",
+                currentLine, 0, "analyzing return statement");
+        }
+    } else {
+        // Return without value (void return)
+        if (currentFunctionReturnType != "void") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Function '" + currentFunctionName + "' expects return value of type '" + 
+                currentFunctionReturnType + "'",
+                currentLine, 0, "analyzing return statement");
+        }
+    }
+}
+
+
+// Add these method implementations to semantic_analyzer.cpp:
+
+bool SemanticAnalyzer::areTypesCompatible(const std::string& expected, const std::string& actual) {
+    if (expected == actual) {
+        return true;
+    }
+    
+    // Allow implicit conversion from int to double
+    if (expected == "double" && actual == "int") {
+        return true;
+    }
+    
+    // Allow bool to be treated as int in certain contexts (like conditions)
+    // But keep them distinct for function return types
+    
+    return false;
+}
+
+std::string SemanticAnalyzer::createFunctionSignature(const std::vector<Parameter>& params, 
+                                                       const std::string& returnType) {
+    std::string signature = returnType + "(";
+    for (size_t i = 0; i < params.size(); ++i) {
+        if (i > 0) signature += ",";
+        signature += params[i].type;
+    }
+    signature += ")";
+    return signature;
+}
+
+void SemanticAnalyzer::validateFunctionSignature(const std::string& name, 
+                                                  const std::vector<Parameter>& params,
+                                                  const std::string& returnType) {
+    // Validate return type
+    validateReturnType(returnType);
+    
+    // Validate parameter types and names
+    for (const auto& param : params) {
+        validateReturnType(param.type);  // Same validation for parameter types
+        
+        // Check for duplicate parameter names
+        for (const auto& other : params) {
+            if (&param != &other && param.name == other.name) {
+                errorHandler.reportError(ErrorCategory::SEMANTIC,
+                    "Duplicate parameter name '" + param.name + "' in function '" + name + "'",
+                    currentLine, 0, "validating function signature");
+                break;
+            }
+        }
+    }
+}
+
+void SemanticAnalyzer::validateReturnType(const std::string& returnType) {
+    if (returnType != "void" && returnType != "int" && returnType != "double" && 
+        returnType != "string" && returnType != "bool") {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Invalid type '" + returnType + "'",
+            currentLine, 0, "validating type");
+        errorHandler.addSuggestion("Use a valid type: int, double, string, bool, or void");
     }
 }

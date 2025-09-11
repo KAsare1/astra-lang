@@ -50,9 +50,9 @@ llvm::Type* IRCodegen::stringToLLVMType(const std::string& typeStr) {
     if (typeStr == "int") return llvm::Type::getInt64Ty(context);
     if (typeStr == "double") return llvm::Type::getDoubleTy(context);
     if (typeStr == "string") return llvm::PointerType::getUnqual(context);
+    if (typeStr == "bool") return llvm::Type::getInt1Ty(context);  // NEW: bool as i1
     if (typeStr.find("void") != std::string::npos) return llvm::Type::getVoidTy(context);
     
-    // Default fallback
     return llvm::Type::getInt64Ty(context);
 }
 
@@ -80,18 +80,20 @@ llvm::Type* IRCodegen::inferType(const Expr* expr) {
 llvm::Value* IRCodegen::createCondition(llvm::Value* value) {
     if (!value) return nullptr;
     
-    if (value->getType()->isIntegerTy()) {
-        // For integers, compare with zero
+    if (value->getType()->isIntegerTy(1)) {
+        // Already a boolean (i1), use directly
+        return value;
+    } else if (value->getType()->isIntegerTy()) {
+        // Convert integer to boolean
         llvm::Value* zero = llvm::ConstantInt::get(value->getType(), 0);
         return builder.CreateICmpNE(value, zero, "cond");
     } else if (value->getType()->isDoubleTy()) {
-        // For doubles, compare with 0.0
+        // Convert double to boolean
         llvm::Value* zero = llvm::ConstantFP::get(value->getType(), 0.0);
         return builder.CreateFCmpONE(value, zero, "cond");
     } else {
         errorHandler.reportError(ErrorCategory::CODEGEN,
-            "Cannot convert value to boolean condition",
-            0, 0, "generating condition");
+            "Cannot convert value to boolean condition", 0, 0, "generating condition");
         return nullptr;
     }
 }
@@ -150,33 +152,51 @@ llvm::Function* IRCodegen::getOrCreatePrintString() {
 // ===== Top-level emit =====
 
 void IRCodegen::emit(const std::vector<std::unique_ptr<Stmt>>& statements) {
-    auto *mainFn = createMain();
-
-    // Emit each statement into main
-    for (const auto& s : statements) {
-        if (s) {  // Only emit non-null statements
-            genStmt(s.get());
+    std::cout << "=== IR CODEGEN: Starting emission ===\n";
+    
+    // PASS 1: Declare all functions
+    for (const auto& stmt : statements) {
+        if (auto funcDecl = dynamic_cast<const FunctionDeclStmt*>(stmt.get())) {
+            std::cout << "IR CODEGEN: Declaring function " << funcDecl->name << "\n";
+            createFunction(funcDecl->name, funcDecl->parameters, funcDecl->returnType);
         }
     }
-
-    // Return 0 from main
-    builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
-
-    // Verify the module & main
-    if (llvm::verifyFunction(*mainFn, &llvm::errs())) {
-        errorHandler.reportError(ErrorCategory::CODEGEN,
-            "IR verification failed for main()",
-            0, 0, "verifying generated code");
-        return;
+    
+    // PASS 2: Generate function bodies
+    for (const auto& stmt : statements) {
+        if (auto funcDecl = dynamic_cast<const FunctionDeclStmt*>(stmt.get())) {
+            std::cout << "IR CODEGEN: Generating function body for " << funcDecl->name << "\n";
+            genFunctionDecl(funcDecl);
+        }
     }
+    
+    // CREATE MAIN FOR TOP-LEVEL STATEMENTS - ADD THIS BACK
+    auto *mainFn = createMain();
+    currentFunctionReturnType = "int";
+    
+    // Generate main function body (non-function statements)
+    for (const auto& stmt : statements) {
+        if (!dynamic_cast<const FunctionDeclStmt*>(stmt.get()) && stmt) {
+            genStmt(stmt.get());
+        }
+    }
+    
+    // Return 0 from main
+    builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));  
+
+    // Verify all functions
+    for (const auto& [name, func] : functions) {
+        if (llvm::verifyFunction(*func, &llvm::errs())) {
+            errorHandler.reportError(ErrorCategory::CODEGEN,
+                "IR verification failed for function: " + name, 0, 0, "verifying generated code");
+        }
+    }
+    
     if (llvm::verifyModule(*module, &llvm::errs())) {
         errorHandler.reportError(ErrorCategory::CODEGEN,
-            "IR verification failed for module",
-            0, 0, "verifying generated code");
-        return;
+            "IR verification failed for module", 0, 0, "verifying generated code");
     }
 }
-
 // ===== Statements =====
 
 void IRCodegen::genStmt(const Stmt* stmt) {
@@ -218,7 +238,16 @@ void IRCodegen::genStmt(const Stmt* stmt) {
         genForStmt(forStmt);
         return;
     }
-    
+    if (auto funcDecl = dynamic_cast<const FunctionDeclStmt*>(stmt)) {
+    std::cout << "DEBUG: IR generating FunctionDeclStmt\n";
+    genFunctionDecl(funcDecl);
+    return;
+}
+if (auto retStmt = dynamic_cast<const ReturnStmt*>(stmt)) {
+    std::cout << "DEBUG: IR generating ReturnStmt\n";
+    genReturnStmt(retStmt);
+    return;
+}
     std::cout << "DEBUG: IR unknown statement type!\n";
     errorHandler.reportError(ErrorCategory::CODEGEN,
         "Unknown statement type in IR generation",
@@ -409,33 +438,36 @@ llvm::Value* IRCodegen::genLiteral(const LiteralExpr* lit) {
 llvm::Value* IRCodegen::genVariable(const VariableExpr* var) {
     std::cout << "DEBUG: genVariable called for: " << var->name << std::endl;
     
+    // CHECK NAMEDVALUES FIRST (for function parameters and local variables)
+    auto it = namedValues.find(var->name);
+    if (it != namedValues.end()) {
+        std::cout << "DEBUG: Variable found in namedValues, loading value" << std::endl;
+        auto *alloca = it->second;
+        
+        // For parameters, try to infer type from the alloca
+        llvm::Type* expectedType = alloca->getAllocatedType();
+        return builder.CreateLoad(expectedType, alloca, var->name + ".val");
+    }
+    
+    // THEN CHECK SYMBOL TABLE (for global variables)
     if (!symbolTable.isDeclared(var->name)) {
-        std::cout << "DEBUG: Variable not declared in symbol table: " << var->name << std::endl;
+        std::cout << "DEBUG: Variable not found anywhere: " << var->name << std::endl;
         errorHandler.reportError(ErrorCategory::CODEGEN,
             "Use of undeclared variable '" + var->name + "'",
             0, 0, "generating variable reference");
         return nullptr;
     }
     
-    auto it = namedValues.find(var->name);
-    if (it == namedValues.end()) {
-        std::cout << "DEBUG: Variable not found in namedValues: " << var->name << std::endl;
-        std::cout << "DEBUG: Available variables in namedValues:" << std::endl;
-        for (const auto& pair : namedValues) {
-            std::cout << "  - " << pair.first << std::endl;
-        }
-        errorHandler.reportError(ErrorCategory::CODEGEN,
-            "Variable not allocated: " + var->name,
-            0, 0, "generating variable reference");
-        return nullptr;
-    }
+    std::cout << "DEBUG: Variable found in symbol table but not in namedValues" << std::endl;
     
-    std::cout << "DEBUG: Variable found, loading value" << std::endl;
-    
-    auto *alloca = it->second;
+    // This shouldn't happen for properly declared variables, but handle it
     llvm::Type* expectedType = getTypeFromSymbolTable(var->name);
+    // Would need to create alloca here for global variables
     
-    return builder.CreateLoad(expectedType, alloca, var->name + ".val");
+    errorHandler.reportError(ErrorCategory::CODEGEN,
+        "Variable not allocated: " + var->name,
+        0, 0, "generating variable reference");
+    return nullptr;
 }
 
 llvm::Value* IRCodegen::genUnary(const UnaryExpr* unary) {
@@ -636,13 +668,13 @@ llvm::Value* IRCodegen::genCall(const CallExpr* call) {
     
 
     // User-defined functions
-    llvm::Function* calleeFn = module->getFunction(call->callee);
-    if (!calleeFn) {
-        errorHandler.reportError(ErrorCategory::CODEGEN,
-            "Call to unknown function: " + call->callee,
-            0, 0, "generating function call");
-        return nullptr;
-    }
+auto it = functions.find(call->callee);
+if (it == functions.end()) {
+    errorHandler.reportError(ErrorCategory::CODEGEN,
+        "Call to unknown function: " + call->callee, 0, 0, "generating function call");
+    return nullptr;
+}
+llvm::Function* calleeFn = it->second;
 
     std::vector<llvm::Value*> args;
     args.reserve(call->arguments.size());
@@ -790,4 +822,145 @@ void IRCodegen::genForStmt(const ForStmt* forStmt) {
     
     // Clean up loop variable
     namedValues.erase(forStmt->variable);
+}
+
+
+
+// NEW: Function creation and management methods
+llvm::Function* IRCodegen::createFunction(const std::string& name, 
+                                          const std::vector<Parameter>& params,
+                                          const std::string& returnType) {
+    if (functions.find(name) != functions.end()) {
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "Function '" + name + "' already defined", 0, 0, "creating function");
+        return nullptr;
+    }
+    
+    llvm::FunctionType* funcType = createFunctionType(params, returnType);
+    if (!funcType) return nullptr;
+    
+    llvm::Function* function = llvm::Function::Create(funcType, 
+        llvm::Function::ExternalLinkage, name, module.get());
+    
+    auto paramIt = params.begin();
+    for (auto& arg : function->args()) {
+        if (paramIt != params.end()) {
+            arg.setName(paramIt->name);
+            ++paramIt;
+        }
+    }
+    
+    functions[name] = function;
+    return function;
+}
+
+llvm::FunctionType* IRCodegen::createFunctionType(const std::vector<Parameter>& params,
+                                                   const std::string& returnType) {
+    llvm::Type* retType = stringToLLVMType(returnType);
+    
+    std::vector<llvm::Type*> paramTypes;
+    for (const auto& param : params) {
+        llvm::Type* paramType = stringToLLVMType(param.type);
+        paramTypes.push_back(paramType);
+    }
+    
+    return llvm::FunctionType::get(retType, paramTypes, false);
+}
+
+void IRCodegen::setupFunctionEntry(llvm::Function* function, const std::vector<Parameter>& params) {
+    llvm::BasicBlock* entryBlock = llvm::BasicBlock::Create(context, "entry", function);
+    builder.SetInsertPoint(entryBlock);
+    
+    std::cout << "DEBUG: Setting up parameters for function\n";
+    
+    auto paramIt = params.begin();
+    for (auto& arg : function->args()) {
+        if (paramIt != params.end()) {
+            std::cout << "DEBUG: Adding parameter " << paramIt->name << " to namedValues\n";
+            llvm::Type* paramType = stringToLLVMType(paramIt->type);
+            llvm::AllocaInst* alloca = createEntryAlloca(function, paramType, paramIt->name);
+            builder.CreateStore(&arg, alloca);
+            namedValues[paramIt->name] = alloca;
+            ++paramIt;
+        }
+    }
+    
+    std::cout << "DEBUG: namedValues after parameter setup:\n";
+    for (const auto& pair : namedValues) {
+        std::cout << "  - " << pair.first << std::endl;
+    }
+}
+
+void IRCodegen::genFunctionDecl(const FunctionDeclStmt* funcDecl) {
+    auto it = functions.find(funcDecl->name);
+    if (it == functions.end()) {
+        errorHandler.reportError(ErrorCategory::CODEGEN,
+            "Function '" + funcDecl->name + "' not found in function table", 0, 0, "generating function");
+        return;
+    }
+    
+    llvm::Function* function = it->second;
+    
+    // Save current state
+    llvm::Function* savedFunction = currentFunction;
+    std::string savedReturnType = currentFunctionReturnType;
+    auto savedNamedValues = namedValues;
+    
+    // Set up new function context
+    currentFunction = function;
+    currentFunctionReturnType = funcDecl->returnType;
+    namedValues.clear();
+    
+    setupFunctionEntry(function, funcDecl->parameters);
+    
+    // Generate function body
+    if (funcDecl->body) {
+        for (const auto& stmt : funcDecl->body->statements) {
+            if (stmt) {
+                genStmt(stmt.get());
+            }
+        }
+    }
+    
+    // Add default return if needed
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        if (funcDecl->returnType == "void") {
+            builder.CreateRetVoid();
+        } else {
+            llvm::Type* retType = stringToLLVMType(funcDecl->returnType);
+            if (retType->isIntegerTy()) {
+                builder.CreateRet(llvm::ConstantInt::get(retType, 0));
+            } else if (retType->isDoubleTy()) {
+                builder.CreateRet(llvm::ConstantFP::get(retType, 0.0));
+            }
+        }
+    }
+    
+    // Restore previous state
+    currentFunction = savedFunction;
+    currentFunctionReturnType = savedReturnType;
+    namedValues = savedNamedValues;
+    
+    if (savedFunction) {
+        for (auto& block : *savedFunction) {
+            if (!block.getTerminator()) {
+                builder.SetInsertPoint(&block);
+                break;
+            }
+        }
+    }
+}
+
+void IRCodegen::genReturnStmt(const ReturnStmt* retStmt) {
+    if (retStmt->value) {
+        llvm::Value* retVal = genExpr(retStmt->value.get());
+        if (!retVal) {
+            errorHandler.reportError(ErrorCategory::CODEGEN,
+                "Failed to generate return value", 0, 0, "generating return statement");
+            return;
+        }
+        builder.CreateRet(retVal);
+    } else {
+        builder.CreateRetVoid();
+    }
 }

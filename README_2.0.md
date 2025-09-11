@@ -381,12 +381,16 @@ If/else statements
 While loops
 Break/continue (if desired)
 
+
+
 Phase 2: Functions (Weeks 3-4)
 
 Function definitions with parameters and return types
 Return statements
 Function calls with argument type checking
 Local variable scoping within functions
+
+
 
 Phase 3: Data Structures (Weeks 5-6)
 

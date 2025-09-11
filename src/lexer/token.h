@@ -9,7 +9,10 @@ enum class TokenType {
     
     // Control flow keywords
     KW_IF, KW_ELSE, KW_WHILE, KW_FOR, KW_BREAK, KW_CONTINUE, KW_TRUE, KW_FALSE,
-    KW_IN,  // NEW: for range-based for loops
+    KW_IN,
+    
+    // NEW: Type keywords
+    KW_INT, KW_DOUBLE, KW_STRING, KW_BOOL, KW_VOID,
     
     // Identifiers and literals
     IDENTIFIER, INT_LITERAL, FLOAT_LITERAL, STRING_LITERAL, CHAR_LITERAL, NUMBER_LITERAL,
@@ -17,7 +20,7 @@ enum class TokenType {
     // Symbols
     PLUS, MINUS, STAR, SLASH, PERCENT, ASSIGN, EQ, NEQ, LT, LTE, GT, GTE,
     AND_AND, OR_OR, AMP, AMP_MUT, BANG, DOT, COMMA, COLON, SEMICOLON,
-    LPAREN, RPAREN, LBRACE, RBRACE, LBRACK, RBRACK, ARROW, COLON_ASSIGN, FAT_ARROW, PIPE, 
+    LPAREN, RPAREN, LBRACE, RBRACE, LBRACK, RBRACK, ARROW, COLON_ASSIGN, FAT_ARROW, PIPE,
 
     // Special
     END_OF_FILE, UNKNOWN
@@ -30,7 +33,6 @@ struct Token {
     int line;
     int column;
     
-    // Constructor
     Token(TokenType t, const std::string &l, int ln, int col)
         : type(t), lexeme(l), line(ln), column(col) {}
 };
@@ -65,6 +67,13 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::KW_TRUE:     return "KW_TRUE";
         case TokenType::KW_FALSE:    return "KW_FALSE";
         case TokenType::KW_IN:       return "KW_IN";
+        
+        // Type keywords
+        case TokenType::KW_INT:      return "KW_INT";
+        case TokenType::KW_DOUBLE:   return "KW_DOUBLE";
+        case TokenType::KW_STRING:   return "KW_STRING";
+        case TokenType::KW_BOOL:     return "KW_BOOL";
+        case TokenType::KW_VOID:     return "KW_VOID";
 
         // Identifiers and literals
         case TokenType::IDENTIFIER:      return "IDENTIFIER";
@@ -105,8 +114,8 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::RBRACK:      return "RBRACK";
         case TokenType::ARROW:       return "ARROW";
         case TokenType::COLON_ASSIGN: return "COLON_ASSIGN";
-        case TokenType::PIPE: return "PIPE";
-        case TokenType::UNKNOWN: return "UNKNOWN";
+        case TokenType::PIPE:        return "PIPE";
+        case TokenType::UNKNOWN:     return "UNKNOWN";
 
         // Special
         case TokenType::END_OF_FILE: return "EOF";

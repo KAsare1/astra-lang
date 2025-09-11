@@ -94,16 +94,25 @@ std::unique_ptr<Stmt> Parser::declaration() {
         if (match({TokenType::KW_LET})) {
             return varDeclaration();
         }
+        if (match({TokenType::KW_FN})) {  // ADD THIS
+            return functionDeclaration();
+        }
         return statement();
     } catch (const std::runtime_error& e) {
-        // Add more context to the error
         std::cerr << "Error in declaration at token position " << current << "\n";
         throw;
     }
 }
 
+
 std::unique_ptr<Stmt> Parser::varDeclaration() {
     Token name = consume(TokenType::IDENTIFIER, "Expected variable name after 'let'");
+    
+    // NEW: Optional type annotation
+    std::string typeAnnotation = "";
+    if (match({TokenType::COLON})) {
+        typeAnnotation = parseTypeAnnotation();
+    }
     
     std::unique_ptr<Expr> initializer = nullptr;
     if (match({TokenType::ASSIGN})) {
@@ -111,7 +120,7 @@ std::unique_ptr<Stmt> Parser::varDeclaration() {
     }
     
     consume(TokenType::SEMICOLON, "Expected ';' after variable declaration");
-    return std::make_unique<VarDeclStmt>(name.lexeme, std::move(initializer));
+    return std::make_unique<VarDeclStmt>(name.lexeme, typeAnnotation, std::move(initializer));
 }
 
 std::unique_ptr<Stmt> Parser::statement() {
@@ -125,6 +134,9 @@ std::unique_ptr<Stmt> Parser::statement() {
     // NEW: Handle for loops
     if (match({TokenType::KW_FOR})) {
         return forStatement();
+    }
+    if (match({TokenType::KW_RETURN})) {  // ADD THIS
+        return returnStatement();
     }
     if (match({TokenType::LBRACE})) {
         // Put the brace back and parse as block
@@ -152,6 +164,19 @@ std::unique_ptr<Stmt> Parser::statement() {
     // Default to expression statement
     return expressionStatement();
 }
+
+std::unique_ptr<Stmt> Parser::returnStatement() {
+    std::unique_ptr<Expr> value = nullptr;
+    
+    // Check if there's a return value
+    if (!check(TokenType::SEMICOLON)) {
+        value = expression();
+    }
+    
+    consume(TokenType::SEMICOLON, "Expected ';' after return statement");
+    return std::make_unique<ReturnStmt>(std::move(value));
+}
+
 
 std::unique_ptr<Stmt> Parser::assignmentStatement() {
     Token name = consume(TokenType::IDENTIFIER, "Expected variable name");
@@ -397,6 +422,7 @@ std::unique_ptr<Expr> Parser::primary() {
     return nullptr;  // Error recovery
 }
 
+
 void Parser::synchronize() {
     advance();
     
@@ -405,14 +431,97 @@ void Parser::synchronize() {
         
         switch (peek().type) {
             case TokenType::KW_LET:
+            case TokenType::KW_FN:        // ADD THIS
             case TokenType::KW_IF:
             case TokenType::KW_WHILE:
             case TokenType::KW_FOR:
+            case TokenType::KW_RETURN:    // ADD THIS
                 return;
             default:
                 break;
         }
         
         advance();
+    }
+}
+
+
+
+// NEW: Function declaration parsing
+std::unique_ptr<Stmt> Parser::functionDeclaration() {
+    Token name = consume(TokenType::IDENTIFIER, "Expected function name after 'fn'");
+    
+    consume(TokenType::LPAREN, "Expected '(' after function name");
+    std::vector<Parameter> parameters = parseParameterList();
+    consume(TokenType::RPAREN, "Expected ')' after parameters");
+    
+    // Parse return type
+    std::string returnType = "void";  // Default return type
+    if (match({TokenType::ARROW})) {
+        returnType = parseTypeAnnotation();
+    }
+    
+    // Parse function body
+    consume(TokenType::LBRACE, "Expected '{' before function body");
+    auto body = std::make_unique<BlockStmt>();
+    
+    while (!check(TokenType::RBRACE) && !isAtEnd()) {
+        auto stmt = declaration();
+        if (stmt) {
+            body->statements.push_back(std::move(stmt));
+        }
+    }
+    
+    consume(TokenType::RBRACE, "Expected '}' after function body");
+    
+    return std::make_unique<FunctionDeclStmt>(name.lexeme, std::move(parameters), 
+                                              returnType, std::move(body));
+}
+
+// NEW: Parse parameter list for functions
+std::vector<Parameter> Parser::parseParameterList() {
+    std::vector<Parameter> parameters;
+    
+    if (!check(TokenType::RPAREN)) {
+        do {
+            Token paramName = consume(TokenType::IDENTIFIER, "Expected parameter name");
+            consume(TokenType::COLON, "Expected ':' after parameter name");
+            std::string paramType = parseTypeAnnotation();
+            
+            parameters.emplace_back(paramName.lexeme, paramType);
+        } while (match({TokenType::COMMA}));
+    }
+    
+    return parameters;
+}
+
+// NEW: Parse type annotations
+std::string Parser::parseTypeAnnotation() {
+    if (isTypeKeyword(peek().type)) {
+        Token typeToken = advance();
+        return tokenTypeToTypeString(typeToken.type);
+    } else {
+        errorHandler.reportError(ErrorCategory::SYNTAX,
+            "Expected type annotation", peek().line, peek().column, "parsing type");
+        errorHandler.addSuggestion("Use a valid type like 'int', 'double', 'string', 'bool', or 'void'");
+        return "int";  // Default fallback
+    }
+}
+
+// NEW: Helper functions for type checking
+bool Parser::isTypeKeyword(TokenType type) const {
+    return type == TokenType::KW_INT || type == TokenType::KW_DOUBLE || 
+           type == TokenType::KW_STRING || type == TokenType::KW_BOOL || 
+           type == TokenType::KW_VOID;
+}
+
+std::string Parser::tokenTypeToTypeString(TokenType type) const {
+    switch (type) {
+        case TokenType::KW_INT: return "int";
+        case TokenType::KW_DOUBLE: return "double";
+        case TokenType::KW_STRING: return "string";
+        case TokenType::KW_BOOL: return "bool";
+        case TokenType::KW_VOID: return "void";
+        default: return "unknown";
     }
 }

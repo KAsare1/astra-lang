@@ -39,8 +39,14 @@ private:
     SymbolTable& symbolTable;
     ErrorHandler& errorHandler;
 
-    // Current function (only 'main' for now)
+    // Function management
     llvm::Function* currentFunction = nullptr;
+    std::unordered_map<std::string, llvm::Function*> functions;  // NEW
+    
+    // NEW: Function return handling
+    std::string currentFunctionReturnType;
+    llvm::BasicBlock* functionExitBlock = nullptr;
+    llvm::AllocaInst* returnValue = nullptr;
 
     // Local variable storage (name -> alloca)
     std::unordered_map<std::string, llvm::AllocaInst*> namedValues;
@@ -57,6 +63,15 @@ private:
     llvm::Type* getTypeFromSymbolTable(const std::string& name);
     llvm::Type* stringToLLVMType(const std::string& typeStr);
 
+    // NEW: Function-related helpers
+    llvm::Function* createFunction(const std::string& name, 
+                                   const std::vector<Parameter>& params,
+                                   const std::string& returnType);
+    llvm::FunctionType* createFunctionType(const std::vector<Parameter>& params,
+                                           const std::string& returnType);
+    void setupFunctionEntry(llvm::Function* function, const std::vector<Parameter>& params);
+    void setupFunctionExit(llvm::Function* function, const std::string& returnType);
+
     // === Stmt / Expr generators ===
     void genStmt(const Stmt* stmt);
     void genVarDecl(const VarDeclStmt* v);
@@ -65,8 +80,9 @@ private:
     void genBlockStmt(const BlockStmt* block);
     void genIfStmt(const IfStmt* ifStmt);
     void genWhileStmt(const WhileStmt* whileStmt);
-    void genForStmt(const ForStmt* forStmt);  // NEW: For loop code generation
-
+    void genForStmt(const ForStmt* forStmt);
+    void genFunctionDecl(const FunctionDeclStmt* funcDecl);  // NEW
+    void genReturnStmt(const ReturnStmt* retStmt);           // NEW
 
     llvm::Value* genExpr(const Expr* expr);
     llvm::Value* genLiteral(const LiteralExpr* lit);

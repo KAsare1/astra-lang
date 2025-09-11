@@ -21,7 +21,7 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"defer", TokenType::KW_DEFER},
     {"spawn", TokenType::KW_SPAWN},
     
-    // NEW: Control flow keywords
+    // Control flow keywords
     {"if", TokenType::KW_IF},
     {"else", TokenType::KW_ELSE},
     {"while", TokenType::KW_WHILE},
@@ -30,6 +30,12 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"continue", TokenType::KW_CONTINUE},
     {"true", TokenType::KW_TRUE},
     {"false", TokenType::KW_FALSE},
-    {"in", TokenType::KW_IN}  // NEW: for range-based for loops
-
+    {"in", TokenType::KW_IN},
+    
+    // NEW: Type keywords for function parameters and returns
+    {"int", TokenType::KW_INT},
+    {"double", TokenType::KW_DOUBLE},
+    {"string", TokenType::KW_STRING},
+    {"bool", TokenType::KW_BOOL},
+    {"void", TokenType::KW_VOID}
 };

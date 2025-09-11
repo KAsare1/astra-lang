@@ -14,19 +14,23 @@ enum class SymbolKind {
 
 struct Symbol {
     std::string name;
-    std::string type;           // e.g., "int", "double", "string", "void(int)"
-    SymbolKind kind;            // What kind of symbol this is
-    int scopeLevel;             // Which scope level it was declared in
-    int lineNumber;             // Line where it was declared
-    bool isInitialized;         // Whether it has been given a value
-    bool isUsed;                // Whether it has been referenced
-    size_t memorySize;          // Size in bytes (for code generation)
-    std::string llvmType;       // LLVM type string (set during IR generation)
+    std::string type;           // e.g., "int", "void(int,double)", "string"
+    SymbolKind kind;            
+    int scopeLevel;             
+    int lineNumber;             
+    bool isInitialized;         
+    bool isUsed;                
+    size_t memorySize;          
+    std::string llvmType;       
     
-    // Constructor
+    // NEW: Function-specific information
+    std::vector<std::string> parameterTypes;  // For functions
+    std::string returnType;                   // For functions
+    bool isBuiltin;                          // True for built-in functions
+    
     Symbol(const std::string& n = "", SymbolKind k = SymbolKind::VARIABLE) 
         : name(n), kind(k), scopeLevel(0), lineNumber(0), 
-          isInitialized(false), isUsed(false), memorySize(0) {}
+          isInitialized(false), isUsed(false), memorySize(0), isBuiltin(false) {}
 };
 
 class SymbolTable {
@@ -40,13 +44,11 @@ public:
     }
 
     // === Phase 1: Lexical Analysis ===
-    // Creates new table entries for identifiers
     void declareIdentifier(const std::string& name, int lineNumber = 0) {
         if (scopes.empty()) {
             throw std::runtime_error("No scope available to declare identifier: " + name);
         }
         
-        // Only add if not already in current scope
         if (scopes.back().find(name) == scopes.back().end()) {
             Symbol symbol(name, SymbolKind::VARIABLE);
             symbol.scopeLevel = currentScopeLevel;
@@ -56,18 +58,14 @@ public:
     }
 
     // === Phase 2: Syntax Analysis ===
-    // Adds attribute information (type, scope, etc.)
     void declare(const std::string& name, SymbolKind kind = SymbolKind::VARIABLE) {
         if (scopes.empty()) {
             throw std::runtime_error("No scope available to declare symbol: " + name);
         }
         
-        // Check if already declared in current scope
         if (scopes.back().find(name) != scopes.back().end()) {
-            // Already exists, just update the kind if needed
             scopes.back()[name].kind = kind;
         } else {
-            // Create new symbol
             Symbol symbol(name, kind);
             symbol.scopeLevel = currentScopeLevel;
             scopes.back()[name] = symbol;
@@ -75,13 +73,17 @@ public:
     }
 
     // === Phase 3: Semantic Analysis ===
-    // Type checking and semantic verification
     void setType(const std::string& name, const std::string& type) {
         Symbol* symbol = findSymbol(name);
         if (!symbol) {
             throw std::runtime_error("Cannot set type for undeclared symbol: " + name);
         }
         symbol->type = type;
+        
+        // NEW: Parse function signatures
+        if (symbol->kind == SymbolKind::FUNCTION) {
+            parseFunctionSignature(type, symbol->returnType, symbol->parameterTypes);
+        }
         
         // Set memory size based on type
         if (type == "int" || type == "i64") {
@@ -90,6 +92,8 @@ public:
             symbol->memorySize = 8;
         } else if (type == "string" || type.find("ptr") != std::string::npos) {
             symbol->memorySize = 8; // pointer size
+        } else if (type == "bool") {
+            symbol->memorySize = 1;
         }
     }
 
@@ -107,8 +111,15 @@ public:
         }
     }
 
+    // NEW: Mark as builtin function
+    void markBuiltin(const std::string& name) {
+        Symbol* symbol = findSymbol(name);
+        if (symbol) {
+            symbol->isBuiltin = true;
+        }
+    }
+
     // === Phase 4: Intermediate Code Generation ===
-    // Runtime allocation information
     void setLLVMType(const std::string& name, const std::string& llvmType) {
         Symbol* symbol = findSymbol(name);
         if (symbol) {
@@ -156,7 +167,28 @@ public:
         return findSymbol(name);
     }
 
-    // Get all symbols in current scope (useful for code generation)
+    // NEW: Function-specific queries
+    bool isFunction(const std::string& name) const {
+        const Symbol* symbol = findSymbol(name);
+        return symbol && symbol->kind == SymbolKind::FUNCTION;
+    }
+
+    std::vector<std::string> getFunctionParameterTypes(const std::string& name) const {
+        const Symbol* symbol = findSymbol(name);
+        if (symbol && symbol->kind == SymbolKind::FUNCTION) {
+            return symbol->parameterTypes;
+        }
+        return {};
+    }
+
+    std::string getFunctionReturnType(const std::string& name) const {
+        const Symbol* symbol = findSymbol(name);
+        if (symbol && symbol->kind == SymbolKind::FUNCTION) {
+            return symbol->returnType;
+        }
+        return "void";
+    }
+
     std::vector<Symbol*> getCurrentScopeSymbols() {
         std::vector<Symbol*> symbols;
         if (!scopes.empty()) {
@@ -175,21 +207,32 @@ public:
             for (const auto& [name, symbol] : scopes[i]) {
                 std::cout << "  " << name 
                          << " -> Type: " << symbol.type
-                         << ", Kind: " << static_cast<int>(symbol.kind)
+                         << ", Kind: " << kindToString(symbol.kind)
                          << ", Line: " << symbol.lineNumber
                          << ", Initialized: " << (symbol.isInitialized ? "Yes" : "No")
-                         << ", Used: " << (symbol.isUsed ? "Yes" : "No")
-                         << std::endl;
+                         << ", Used: " << (symbol.isUsed ? "Yes" : "No");
+                
+                if (symbol.kind == SymbolKind::FUNCTION) {
+                    std::cout << ", ReturnType: " << symbol.returnType;
+                    std::cout << ", Params: [";
+                    for (size_t j = 0; j < symbol.parameterTypes.size(); ++j) {
+                        if (j > 0) std::cout << ", ";
+                        std::cout << symbol.parameterTypes[j];
+                    }
+                    std::cout << "]";
+                }
+                
+                std::cout << std::endl;
             }
         }
     }
 
-    // Analyze unused variables
     std::vector<std::string> getUnusedVariables() const {
         std::vector<std::string> unused;
         for (const auto& scope : scopes) {
             for (const auto& [name, symbol] : scope) {
-                if (symbol.kind == SymbolKind::VARIABLE && !symbol.isUsed) {
+                if ((symbol.kind == SymbolKind::VARIABLE || symbol.kind == SymbolKind::FUNCTION) 
+                    && !symbol.isUsed && !symbol.isBuiltin) {
                     unused.push_back(name);
                 }
             }
@@ -199,7 +242,6 @@ public:
 
 private:
     Symbol* findSymbol(const std::string& name) {
-        // Search from innermost to outermost scope
         for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
             auto found = it->find(name);
             if (found != it->end()) {
@@ -210,7 +252,6 @@ private:
     }
 
     const Symbol* findSymbol(const std::string& name) const {
-        // Search from innermost to outermost scope
         for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
             auto found = it->find(name);
             if (found != it->end()) {
@@ -218,5 +259,45 @@ private:
             }
         }
         return nullptr;
+    }
+
+    // NEW: Parse function signature string
+    void parseFunctionSignature(const std::string& signature, 
+                                std::string& returnType, 
+                                std::vector<std::string>& paramTypes) {
+        size_t parenPos = signature.find('(');
+        if (parenPos == std::string::npos) {
+            returnType = signature;
+            return;
+        }
+        
+        returnType = signature.substr(0, parenPos);
+        
+        std::string paramStr = signature.substr(parenPos + 1);
+        size_t endParen = paramStr.find(')');
+        if (endParen != std::string::npos) {
+            paramStr = paramStr.substr(0, endParen);
+        }
+        
+        if (!paramStr.empty() && paramStr != "any") {
+            // Split by comma
+            size_t start = 0;
+            size_t pos = 0;
+            while ((pos = paramStr.find(',', start)) != std::string::npos) {
+                paramTypes.push_back(paramStr.substr(start, pos - start));
+                start = pos + 1;
+            }
+            paramTypes.push_back(paramStr.substr(start));
+        }
+    }
+
+    std::string kindToString(SymbolKind kind) const {
+        switch (kind) {
+            case SymbolKind::VARIABLE: return "Variable";
+            case SymbolKind::FUNCTION: return "Function";
+            case SymbolKind::PARAMETER: return "Parameter";
+            case SymbolKind::TEMPORARY: return "Temporary";
+            default: return "Unknown";
+        }
     }
 };

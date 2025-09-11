@@ -1,3 +1,17 @@
-for (i in 0:10:2) {
-    print(i);
+// Test 2: Void functions and no return value
+fn greet(name: string) -> void {
+    print("Hello, ");
+    print(name);
+    print("!");
 }
+
+fn countdown(start: int) -> void {
+    for (i in start:0:-1) {
+        print(i);
+    }
+    print("Blast off!");
+}
+
+let username = "Alice";
+greet(username);
+countdown(3);

@@ -27,25 +27,31 @@ private:
     bool check(TokenType type) const;
     bool match(std::initializer_list<TokenType> types);
     Token consume(TokenType type, const std::string& errorMessage);
-    void synchronize(); // Error recovery
+    void synchronize();
 
-    // Grammar rules for statements
+    // Grammar rules for declarations and statements
     std::unique_ptr<Stmt> declaration();
     std::unique_ptr<Stmt> varDeclaration();
+    std::unique_ptr<Stmt> functionDeclaration();  // NEW: Function declarations
     std::unique_ptr<Stmt> statement();
     
     // Control flow statements
     std::unique_ptr<Stmt> ifStatement();
     std::unique_ptr<Stmt> whileStatement();
-    std::unique_ptr<Stmt> forStatement();           // NEW: For loop parsing
+    std::unique_ptr<Stmt> forStatement();
     std::unique_ptr<Stmt> blockStatement();
     std::unique_ptr<Stmt> expressionStatement();
+    std::unique_ptr<Stmt> returnStatement();      // NEW: Return statements
     
     // Assignment statement
     std::unique_ptr<Stmt> assignmentStatement();
     
-    // NEW: Range expression parsing
+    // Range expression parsing
     std::unique_ptr<Expr> parseRangeExpression();
+    
+    // NEW: Function-related parsing
+    std::vector<Parameter> parseParameterList();
+    std::string parseTypeAnnotation();
     
     // Expression parsing with proper precedence
     std::unique_ptr<Expr> expression();
@@ -59,4 +65,8 @@ private:
     std::unique_ptr<Expr> unary();
     std::unique_ptr<Expr> call();
     std::unique_ptr<Expr> primary();
+    
+    // NEW: Helper functions
+    bool isTypeKeyword(TokenType type) const;
+    std::string tokenTypeToTypeString(TokenType type) const;
 };

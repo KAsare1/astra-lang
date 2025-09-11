@@ -16,6 +16,7 @@ inline void printExpr(const Expr* expr, int indent) {
         printIndent(indent); std::cout << "(null expr)\n";
         return;
     }
+    
     if (auto lit = dynamic_cast<const LiteralExpr*>(expr)) {
         printIndent(indent); std::cout << "LiteralExpr: " << lit->value << "\n";
     } else if (auto var = dynamic_cast<const VariableExpr*>(expr)) {
@@ -42,6 +43,11 @@ inline void printExpr(const Expr* expr, int indent) {
             printIndent(indent + 1); std::cout << "Step:\n";
             printExpr(range->step.get(), indent + 2);
         }
+    } else if (auto ret = dynamic_cast<const ReturnExpr*>(expr)) {
+        printIndent(indent); std::cout << "ReturnExpr\n";
+        if (ret->value) {
+            printExpr(ret->value.get(), indent + 1);
+        }
     } else {
         printIndent(indent); std::cout << "Unknown Expr\n";
     }
@@ -52,8 +58,14 @@ inline void printStmt(const Stmt* stmt, int indent) {
         printIndent(indent); std::cout << "(null stmt)\n";
         return;
     }
+    
     if (auto var = dynamic_cast<const VarDeclStmt*>(stmt)) {
-        printIndent(indent); std::cout << "VarDeclStmt: " << var->name << "\n";
+        printIndent(indent); 
+        std::cout << "VarDeclStmt: " << var->name;
+        if (!var->type.empty()) {
+            std::cout << " : " << var->type;
+        }
+        std::cout << "\n";
         if (var->initializer) {
             printExpr(var->initializer.get(), indent + 1);
         }
@@ -91,6 +103,20 @@ inline void printStmt(const Stmt* stmt, int indent) {
         printExpr(forStmt->range.get(), indent + 2);
         printIndent(indent + 1); std::cout << "Body:\n";
         printStmt(forStmt->body.get(), indent + 2);
+    } else if (auto retStmt = dynamic_cast<const ReturnStmt*>(stmt)) {
+        printIndent(indent); std::cout << "ReturnStmt\n";
+        if (retStmt->value) {
+            printExpr(retStmt->value.get(), indent + 1);
+        }
+    } else if (auto funcDecl = dynamic_cast<const FunctionDeclStmt*>(stmt)) {
+        printIndent(indent); 
+        std::cout << "FunctionDeclStmt: " << funcDecl->name << "(";
+        for (size_t i = 0; i < funcDecl->parameters.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << funcDecl->parameters[i].name << ":" << funcDecl->parameters[i].type;
+        }
+        std::cout << ") -> " << funcDecl->returnType << "\n";
+        printStmt(funcDecl->body.get(), indent + 1);
     } else {
         printIndent(indent); std::cout << "Unknown Stmt\n";
     }
