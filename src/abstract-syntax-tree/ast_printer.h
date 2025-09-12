@@ -1,3 +1,4 @@
+// === ast_printer.h FIXES ===
 #pragma once
 #include "ast.h"
 #include <iostream>
@@ -48,7 +49,30 @@ inline void printExpr(const Expr* expr, int indent) {
         if (ret->value) {
             printExpr(ret->value.get(), indent + 1);
         }
-    } else {
+    } 
+    // NEW: Handle array literals
+    else if (auto arrayLit = dynamic_cast<const ArrayLiteralExpr*>(expr)) {
+        printIndent(indent); std::cout << "ArrayLiteralExpr [\n";
+        for (const auto& element : arrayLit->elements) {
+            printExpr(element.get(), indent + 1);
+        }
+        printIndent(indent); std::cout << "]\n";
+    }
+    // NEW: Handle index expressions
+    else if (auto indexExpr = dynamic_cast<const IndexExpr*>(expr)) {
+        printIndent(indent); std::cout << "IndexExpr\n";
+        printIndent(indent + 1); std::cout << "Object:\n";
+        printExpr(indexExpr->object.get(), indent + 2);
+        printIndent(indent + 1); std::cout << "Index:\n";
+        printExpr(indexExpr->index.get(), indent + 2);
+    }
+    // NEW: Handle concatenation expressions
+    else if (auto concatExpr = dynamic_cast<const ConcatExpr*>(expr)) {
+        printIndent(indent); std::cout << "ConcatExpr\n";
+        printExpr(concatExpr->left.get(), indent + 1);
+        printExpr(concatExpr->right.get(), indent + 1);
+    }
+    else {
         printIndent(indent); std::cout << "Unknown Expr\n";
     }
 }
@@ -75,7 +99,18 @@ inline void printStmt(const Stmt* stmt, int indent) {
     } else if (auto assign = dynamic_cast<const AssignmentStmt*>(stmt)) {
         printIndent(indent); std::cout << "AssignmentStmt: " << assign->name << " =\n";
         printExpr(assign->value.get(), indent + 1);
-    } else if (auto block = dynamic_cast<const BlockStmt*>(stmt)) {
+    } 
+    // NEW: Handle index assignment statements
+    else if (auto indexAssign = dynamic_cast<const IndexAssignmentStmt*>(stmt)) {
+        printIndent(indent); std::cout << "IndexAssignmentStmt\n";
+        printIndent(indent + 1); std::cout << "Object:\n";
+        printExpr(indexAssign->object.get(), indent + 2);
+        printIndent(indent + 1); std::cout << "Index:\n";
+        printExpr(indexAssign->index.get(), indent + 2);
+        printIndent(indent + 1); std::cout << "Value:\n";
+        printExpr(indexAssign->value.get(), indent + 2);
+    }
+    else if (auto block = dynamic_cast<const BlockStmt*>(stmt)) {
         printIndent(indent); std::cout << "BlockStmt {\n";
         for (const auto& statement : block->statements) {
             printStmt(statement.get(), indent + 1);

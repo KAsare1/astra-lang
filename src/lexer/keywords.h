@@ -32,10 +32,29 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"false", TokenType::KW_FALSE},
     {"in", TokenType::KW_IN},
     
-    // NEW: Type keywords for function parameters and returns
+    // Type keywords for function parameters and returns
     {"int", TokenType::KW_INT},
     {"double", TokenType::KW_DOUBLE},
     {"string", TokenType::KW_STRING},
     {"bool", TokenType::KW_BOOL},
-    {"void", TokenType::KW_VOID}
+    {"void", TokenType::KW_VOID},
+    
+    // NEW: Built-in function keywords
+    // Core data structure functions
+    {"len", TokenType::KW_LEN},           // Generic length function
+    {"push", TokenType::KW_PUSH},         // Array append
+    {"pop", TokenType::KW_POP},           // Array pop
+    
+    // String functions
+    {"concat", TokenType::KW_CONCAT},     // String concatenation
+    {"substr", TokenType::KW_SUBSTR},     // Substring extraction
+    
+    // I/O functions
+    {"input", TokenType::KW_INPUT},       // Read user input
+    {"println", TokenType::KW_PRINTLN},   // Print with newline
+    
+    // Type conversion functions
+    {"to_string", TokenType::KW_TO_STRING}, // Convert to string
+    {"to_int", TokenType::KW_TO_INT},       // Parse integer
+    {"to_double", TokenType::KW_TO_DOUBLE}  // Parse double
 };

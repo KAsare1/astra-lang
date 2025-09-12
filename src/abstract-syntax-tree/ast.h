@@ -47,10 +47,37 @@ struct RangeExpr : Expr {
         : start(std::move(s)), end(std::move(e)), step(std::move(st)) {}
 };
 
-// NEW: Return expression for function returns
 struct ReturnExpr : Expr {
-    std::unique_ptr<Expr> value;  // Optional return value
+    std::unique_ptr<Expr> value;
     ReturnExpr(std::unique_ptr<Expr> val = nullptr) : value(std::move(val)) {}
+};
+
+// NEW: Array literal expression [1, 2, 3]
+struct ArrayLiteralExpr : Expr {
+    std::vector<std::unique_ptr<Expr>> elements;
+    std::string elementType;  // Inferred during semantic analysis
+    
+    ArrayLiteralExpr() = default;
+    ArrayLiteralExpr(std::vector<std::unique_ptr<Expr>> elems) 
+        : elements(std::move(elems)) {}
+};
+
+// NEW: Array/string indexing expression arr[index]
+struct IndexExpr : Expr {
+    std::unique_ptr<Expr> object;   // Array or string being indexed
+    std::unique_ptr<Expr> index;    // Index expression
+    
+    IndexExpr(std::unique_ptr<Expr> obj, std::unique_ptr<Expr> idx)
+        : object(std::move(obj)), index(std::move(idx)) {}
+};
+
+// NEW: String concatenation expression (could use BinaryExpr but this is clearer)
+struct ConcatExpr : Expr {
+    std::unique_ptr<Expr> left;
+    std::unique_ptr<Expr> right;
+    
+    ConcatExpr(std::unique_ptr<Expr> l, std::unique_ptr<Expr> r)
+        : left(std::move(l)), right(std::move(r)) {}
 };
 
 struct Stmt {
@@ -59,7 +86,7 @@ struct Stmt {
 
 struct VarDeclStmt : Stmt {
     std::string name;
-    std::string type;  // NEW: Explicit type annotation
+    std::string type;  // Enhanced: "int", "[int]", "string", etc.
     std::unique_ptr<Expr> initializer;
     
     VarDeclStmt(const std::string& n, const std::string& t = "", std::unique_ptr<Expr> init = nullptr)
@@ -77,6 +104,16 @@ struct AssignmentStmt : Stmt {
     
     AssignmentStmt(const std::string& n, std::unique_ptr<Expr> val)
         : name(n), value(std::move(val)) {}
+};
+
+// NEW: Index assignment statement arr[i] = value
+struct IndexAssignmentStmt : Stmt {
+    std::unique_ptr<Expr> object;   // Array being assigned to
+    std::unique_ptr<Expr> index;    // Index expression
+    std::unique_ptr<Expr> value;    // Value to assign
+    
+    IndexAssignmentStmt(std::unique_ptr<Expr> obj, std::unique_ptr<Expr> idx, std::unique_ptr<Expr> val)
+        : object(std::move(obj)), index(std::move(idx)), value(std::move(val)) {}
 };
 
 struct BlockStmt : Stmt {
@@ -115,25 +152,22 @@ struct ForStmt : Stmt {
         : variable(var), range(std::move(r)), body(std::move(b)) {}
 };
 
-// NEW: Return statement
 struct ReturnStmt : Stmt {
-    std::unique_ptr<Expr> value;  // Optional return value
+    std::unique_ptr<Expr> value;
     ReturnStmt(std::unique_ptr<Expr> val = nullptr) : value(std::move(val)) {}
 };
 
-// NEW: Function parameter structure
 struct Parameter {
     std::string name;
-    std::string type;
+    std::string type;  // Enhanced: supports "[int]", "[string]", etc.
     
     Parameter(const std::string& n, const std::string& t) : name(n), type(t) {}
 };
 
-// NEW: Function declaration statement
 struct FunctionDeclStmt : Stmt {
     std::string name;
     std::vector<Parameter> parameters;
-    std::string returnType;
+    std::string returnType;  // Enhanced: supports "[int]", etc.
     std::unique_ptr<BlockStmt> body;
     
     FunctionDeclStmt(const std::string& n, std::vector<Parameter> params, 

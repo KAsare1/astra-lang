@@ -1,4 +1,5 @@
 #include "semantic_analyzer.h"
+#include <iostream>
 
 SemanticAnalyzer::SemanticAnalyzer(SymbolTable& symbolTable, ErrorHandler& errors) 
     : symbols(symbolTable), errorHandler(errors), currentLine(0),
@@ -23,9 +24,55 @@ const SymbolTable& SemanticAnalyzer::getSymbolTable() const {
 }
 
 void SemanticAnalyzer::initializeBuiltins() {
+    // Existing built-ins
     symbols.declare("print", SymbolKind::FUNCTION);
     symbols.setType("print", "void(any)");
     symbols.markUsed("print");
+    symbols.markBuiltin("print");
+    
+    // NEW: Generic built-ins
+    symbols.declare("len", SymbolKind::FUNCTION);
+    symbols.setType("len", "int(any)");  // Generic: works with arrays and strings
+    symbols.markBuiltin("len");
+    
+    symbols.declare("println", SymbolKind::FUNCTION);
+    symbols.setType("println", "void(any)");
+    symbols.markBuiltin("println");
+    
+    // NEW: Array-specific built-ins
+    symbols.declare("push", SymbolKind::FUNCTION);
+    symbols.setType("push", "void([any],any)");  // push(array, element)
+    symbols.markBuiltin("push");
+    
+    symbols.declare("pop", SymbolKind::FUNCTION);
+    symbols.setType("pop", "any([any])");  // pop(array) -> element
+    symbols.markBuiltin("pop");
+    
+    // NEW: String built-ins
+    symbols.declare("concat", SymbolKind::FUNCTION);
+    symbols.setType("concat", "string(string,string)");
+    symbols.markBuiltin("concat");
+    
+    symbols.declare("substr", SymbolKind::FUNCTION);
+    symbols.setType("substr", "string(string,int,int)");  // substr(str, start, len)
+    symbols.markBuiltin("substr");
+    
+    symbols.declare("input", SymbolKind::FUNCTION);
+    symbols.setType("input", "string()");
+    symbols.markBuiltin("input");
+    
+    // NEW: Type conversion built-ins
+    symbols.declare("to_string", SymbolKind::FUNCTION);
+    symbols.setType("to_string", "string(any)");
+    symbols.markBuiltin("to_string");
+    
+    symbols.declare("to_int", SymbolKind::FUNCTION);
+    symbols.setType("to_int", "int(string)");
+    symbols.markBuiltin("to_int");
+    
+    symbols.declare("to_double", SymbolKind::FUNCTION);
+    symbols.setType("to_double", "double(string)");
+    symbols.markBuiltin("to_double");
 }
 
 void SemanticAnalyzer::analyzeStmt(const Stmt* stmt) {
@@ -37,6 +84,10 @@ void SemanticAnalyzer::analyzeStmt(const Stmt* stmt) {
     }
     else if (auto assignStmt = dynamic_cast<const AssignmentStmt*>(stmt)) {
         handleAssignmentStmt(assignStmt);
+    }
+    // NEW: Handle index assignment
+    else if (auto indexAssign = dynamic_cast<const IndexAssignmentStmt*>(stmt)) {
+        handleIndexAssignmentStmt(indexAssign);
     }
     else if (auto blockStmt = dynamic_cast<const BlockStmt*>(stmt)) {
         handleBlockStmt(blockStmt);
@@ -50,7 +101,6 @@ void SemanticAnalyzer::analyzeStmt(const Stmt* stmt) {
     else if (auto forStmt = dynamic_cast<const ForStmt*>(stmt)) {
         handleForStmt(forStmt);
     }
-    // ADD THESE TWO CASES:
     else if (auto funcDecl = dynamic_cast<const FunctionDeclStmt*>(stmt)) {
         handleFunctionDecl(funcDecl);
     }
@@ -77,19 +127,58 @@ void SemanticAnalyzer::handleVarDecl(const VarDeclStmt* varDecl) {
     // Declare the variable first
     symbols.declare(varDecl->name, SymbolKind::VARIABLE);
     
-    // Then analyze the initializer and set the type
+    std::string declaredType = "";
+    
+    // Handle explicit type annotation
+    if (!varDecl->type.empty()) {
+        declaredType = varDecl->type;
+        validateTypeDeclaration(declaredType);
+    }
+    
+    // Analyze initializer and infer/check type
     if (varDecl->initializer) {
         std::string initializerType = analyzeExpr(varDecl->initializer.get());
-        if (initializerType != "error") {  // Only set type if analysis succeeded
-            symbols.setType(varDecl->name, initializerType);
-            symbols.markInitialized(varDecl->name);
+        if (initializerType == "error") {
+            return;
         }
-    } else {
-        // Default initialization
-        symbols.setType(varDecl->name, "int");
+        
+        if (declaredType.empty()) {
+            // Type inference from initializer
+            declaredType = initializerType;
+        } else {
+            // Type checking against declared type
+            if (!areTypesCompatible(declaredType, initializerType)) {
+                errorHandler.reportError(ErrorCategory::SEMANTIC,
+                    "Initializer type '" + initializerType + 
+                    "' does not match declared type '" + declaredType + 
+                    "' for variable '" + varDecl->name + "'",
+                    currentLine, 0, "declaring variable");
+                errorHandler.addSuggestion("Ensure the initializer matches the declared type");
+                return;
+            }
+        }
+        
+        symbols.setType(varDecl->name, declaredType);
         symbols.markInitialized(varDecl->name);
+    } else {
+        // No initializer - use declared type or default
+        if (declaredType.empty()) {
+            declaredType = "int";  // Default type
+        }
+        symbols.setType(varDecl->name, declaredType);
+        
+        // Arrays and complex types should be initialized
+        if (isArrayType(declaredType)) {
+            errorHandler.reportWarning(ErrorCategory::SEMANTIC,
+                "Array variable '" + varDecl->name + "' declared without initialization",
+                currentLine, 0, "declaring variable");
+            errorHandler.addSuggestion("Initialize arrays with a literal like '[1, 2, 3]' or '[]'");
+        }
+        
+        symbols.markInitialized(varDecl->name);  // Consider uninitialized vars as default-initialized
     }
 }
+
 
 // Handle assignment statements
 void SemanticAnalyzer::handleAssignmentStmt(const AssignmentStmt* assignStmt) {
@@ -109,23 +198,29 @@ void SemanticAnalyzer::handleAssignmentStmt(const AssignmentStmt* assignStmt) {
     std::string valueType = analyzeExpr(assignStmt->value.get());
     
     if (valueType == "error") {
-        return;  // Error already reported in expression analysis
-    }
-    
-    // Check type compatibility
-    if (varType != valueType) {
-        errorHandler.reportError(ErrorCategory::SEMANTIC,
-            "Type mismatch in assignment: cannot assign '" + valueType + "' to variable '" + 
-            assignStmt->name + "' of type '" + varType + "'",
-            currentLine, 0, "analyzing assignment");
-        errorHandler.addSuggestion("Ensure the assigned value matches the variable's type");
         return;
     }
     
-    // Mark variable as used (since we're reading its type) and ensure it's initialized
-    symbols.markUsed(assignStmt->name);
+    // Enhanced type compatibility checking for arrays
+    if (!areTypesCompatible(varType, valueType)) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Type mismatch in assignment: cannot assign '" + valueType + 
+            "' to variable '" + assignStmt->name + "' of type '" + varType + "'",
+            currentLine, 0, "analyzing assignment");
+        
+        // Provide specific suggestions for common array mistakes
+        if (isArrayType(varType) && !isArrayType(valueType)) {
+            errorHandler.addSuggestion("Use array literal syntax like '[1, 2, 3]' for array assignment");
+        } else if (!isArrayType(varType) && isArrayType(valueType)) {
+            errorHandler.addSuggestion("Declare variable as array type like 'let " + assignStmt->name + ": " + valueType + "'");
+        } else {
+            errorHandler.addSuggestion("Ensure the assigned value matches the variable's type");
+        }
+        return;
+    }
     
-    // The assignment itself acts as initialization
+    // Mark variable as used and initialized
+    symbols.markUsed(assignStmt->name);
     symbols.markInitialized(assignStmt->name);
 }
 
@@ -238,40 +333,32 @@ void SemanticAnalyzer::handleForStmt(const ForStmt* forStmt) {
 }
 
 std::string SemanticAnalyzer::analyzeExpr(const Expr* expr) {
-    if (!expr) return "error";  // Handle null expressions from parser errors
+    if (!expr) return "error";
     
     if (auto varExpr = dynamic_cast<const VariableExpr*>(expr)) {
+        // Existing variable analysis...
         if (!symbols.isDeclared(varExpr->name)) {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
                 "Use of undeclared variable '" + varExpr->name + "'",
                 currentLine, 0, "analyzing expression");
-            
-            // Could add variable name suggestions here
             return "error";
         }
         
-        // Check if variable is initialized before use
         const Symbol* symbol = symbols.getSymbol(varExpr->name);
         if (symbol && symbol->kind == SymbolKind::VARIABLE && !symbol->isInitialized) {
             errorHandler.reportWarning(ErrorCategory::SEMANTIC,
                 "Variable '" + varExpr->name + "' may be used before initialization",
                 currentLine, 0, "analyzing variable usage");
-            errorHandler.addSuggestion("Initialize the variable before using it");
         }
         
-        // Mark variable as used
         symbols.markUsed(varExpr->name);
-        
         return symbols.getType(varExpr->name);
     }
     else if (auto literal = dynamic_cast<const LiteralExpr*>(expr)) {
+        // Existing literal analysis...
         const std::string& v = literal->value;
         
-        // Handle boolean literals
-        if (v == "0" || v == "1") {
-            // Could be boolean or integer - treat as int for now
-            return "int";
-        }
+        if (v == "0" || v == "1") return "int";
         
         bool hasDot = false, allDigitsOrDot = !v.empty();
         for (char c : v) {
@@ -282,24 +369,29 @@ std::string SemanticAnalyzer::analyzeExpr(const Expr* expr) {
         if (allDigitsOrDot && !hasDot) return "int";
         return "string";
     }
+    // NEW: Handle array literals
+    else if (auto arrayLit = dynamic_cast<const ArrayLiteralExpr*>(expr)) {
+        return analyzeArrayLiteral(arrayLit);
+    }
+    // NEW: Handle indexing expressions
+    else if (auto indexExpr = dynamic_cast<const IndexExpr*>(expr)) {
+        return analyzeIndexExpr(indexExpr);
+    }
     else if (auto unary = dynamic_cast<const UnaryExpr*>(expr)) {
+        // Existing unary analysis...
         std::string operandType = analyzeExpr(unary->operand.get());
-        
-        if (operandType == "error") {
-            return "error";  // Propagate errors
-        }
+        if (operandType == "error") return "error";
         
         if (unary->op == "-") {
             if (operandType == "int" || operandType == "double") {
-                return operandType;  // Unary minus preserves numeric type
+                return operandType;
             } else {
                 errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Unary minus operator '-' requires numeric type, got '" + operandType + "'",
+                    "Unary minus requires numeric type, got '" + operandType + "'",
                     currentLine, 0, "analyzing unary expression");
                 return "error";
             }
         } else if (unary->op == "!") {
-            // Logical NOT always returns boolean (represented as int)
             return "bool";
         } else {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
@@ -309,90 +401,24 @@ std::string SemanticAnalyzer::analyzeExpr(const Expr* expr) {
         }
     }
     else if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {
+        // ENHANCED: Handle string concatenation and array operations
         std::string leftType = analyzeExpr(binary->left.get());
         std::string rightType = analyzeExpr(binary->right.get());
         
         if (leftType == "error" || rightType == "error") {
-            return "error";  // Propagate errors
-        }
-        
-        // Arithmetic operators (+, -, *, /, %)
-        if (binary->op == "+" || binary->op == "-" || binary->op == "*" || binary->op == "/") {
-            if (leftType != rightType) {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Type mismatch in binary expression: '" + leftType + "' " + binary->op + " '" + rightType + "'",
-                    currentLine, 0, "analyzing binary expression");
-                errorHandler.addSuggestion("Ensure both operands have the same type");
-                return "error";
-            }
-            
-            if (leftType == "int" || leftType == "double") {
-                return leftType;  // Result has same type as operands
-            } else {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Arithmetic operator '" + binary->op + "' requires numeric types, got '" + leftType + "'",
-                    currentLine, 0, "analyzing binary expression");
-                return "error";
-            }
-        }
-        // Modulo operator (%)
-        else if (binary->op == "%") {
-            if (leftType != rightType) {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Type mismatch in modulo expression: '" + leftType + "' % '" + rightType + "'",
-                    currentLine, 0, "analyzing binary expression");
-                return "error";
-            }
-            
-            if (leftType == "int") {
-                return "int";
-            } else {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Modulo operator '%' requires integer types, got '" + leftType + "'",
-                    currentLine, 0, "analyzing binary expression");
-                return "error";
-            }
-        }
-        // Comparison operators (==, !=, <, <=, >, >=)
-else if (binary->op == "==" || binary->op == "!=" || 
-         binary->op == "<" || binary->op == "<=" || 
-         binary->op == ">" || binary->op == ">=") {
-    if (!areTypesCompatible(leftType, rightType)) {
-        errorHandler.reportError(ErrorCategory::SEMANTIC,
-            "Type mismatch in comparison: '" + leftType + "' " + binary->op + " '" + rightType + "'",
-            currentLine, 0, "analyzing binary expression");
-        return "error";
-    }
-    
-    if (leftType == "int" || leftType == "double") {
-        return "bool";  // CHANGED: Return "bool" instead of "int"
-    } else {
-        errorHandler.reportError(ErrorCategory::SEMANTIC,
-            "Comparison operator '" + binary->op + "' requires numeric types, got '" + leftType + "'",
-            currentLine, 0, "analyzing binary expression");
-        return "error";
-    }
-}
-        // Logical operators (&&, ||)
-else if (binary->op == "&&" || binary->op == "||") {
-    if ((leftType == "int" || leftType == "double" || leftType == "bool") && 
-        (rightType == "int" || rightType == "double" || rightType == "bool")) {
-        return "bool";  // CHANGED: Return "bool" instead of "int"
-    } else {
-        errorHandler.reportError(ErrorCategory::SEMANTIC,
-            "Logical operator '" + binary->op + "' requires boolean-convertible types",
-            currentLine, 0, "analyzing binary expression");
-        return "error";
-    }
-}
-        else {
-            errorHandler.reportError(ErrorCategory::SEMANTIC,
-                "Unknown binary operator: " + binary->op,
-                currentLine, 0, "analyzing binary expression");
             return "error";
         }
+        
+        return inferBinaryResultType(leftType, rightType, binary->op);
     }
     else if (auto call = dynamic_cast<const CallExpr*>(expr)) {
+        // ENHANCED: Handle built-in functions
+        if (symbols.isFunction(call->callee) && 
+            symbols.getSymbol(call->callee)->isBuiltin) {
+            return analyzeBuiltinCall(call);
+        }
+        
+        // Existing function call analysis...
         if (!symbols.isDeclared(call->callee)) {
             errorHandler.reportError(ErrorCategory::SEMANTIC,
                 "Call to undeclared function '" + call->callee + "'",
@@ -402,85 +428,58 @@ else if (binary->op == "&&" || binary->op == "||") {
         
         symbols.markUsed(call->callee);
         
-        if (call->callee == "print") {
-            if (call->arguments.size() != 1) {
-                errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "print() expects exactly one argument, got " + std::to_string(call->arguments.size()),
-                    currentLine, 0, "analyzing function call");
-                errorHandler.addSuggestion("Provide exactly one argument to print()");
-                return "error";
-            }
-            
-            // Analyze the argument
-            std::string argType = analyzeExpr(call->arguments[0].get());
-            if (argType == "error") {
-                return "error";
-            }
-            
-            return "void";
-        }
         if (symbols.isFunction(call->callee)) {
-    std::string returnType = symbols.getFunctionReturnType(call->callee);
-    
-    // Analyze arguments
-    for (const auto& arg : call->arguments) {
-        std::string argType = analyzeExpr(arg.get());
-        if (argType == "error") return "error";
-    }
-    
-    return returnType;  // Returns "int", not "int(int)"
-}
+            std::string returnType = symbols.getFunctionReturnType(call->callee);
+            
+            for (const auto& arg : call->arguments) {
+                std::string argType = analyzeExpr(arg.get());
+                if (argType == "error") return "error";
+            }
+            
+            return returnType;
+        }
         
         return symbols.getType(call->callee);
     }
-    // NEW: Handle range expressions
     else if (auto rangeExpr = dynamic_cast<const RangeExpr*>(expr)) {
-    std::string startType = analyzeExpr(rangeExpr->start.get());
-    std::string endType = analyzeExpr(rangeExpr->end.get());
-    
-    if (startType == "error" || endType == "error") {
-        return "error";  // Propagate errors
-    }
-    
-    // Both start and end should be integers
-    if (startType != "int" || endType != "int") {
-        errorHandler.reportError(ErrorCategory::SEMANTIC,
-            "Range expressions require integer start and end values, got '" + 
-            startType + "' and '" + endType + "'",
-            currentLine, 0, "analyzing range expression");
-        errorHandler.addSuggestion("Use integer values for range bounds like '0:10'");
-        return "error";
-    }
-    
-    // NEW: Phase 2 - Validate step if provided
-    if (rangeExpr->step) {
-        std::string stepType = analyzeExpr(rangeExpr->step.get());
-        if (stepType == "error") {
-            return "error";
-        }
-        if (stepType != "int") {
-            errorHandler.reportError(ErrorCategory::SEMANTIC,
-                "Range step must be an integer, got '" + stepType + "'",
-                currentLine, 0, "analyzing range expression");
-            errorHandler.addSuggestion("Use integer step values like '0:10:2'");
+        // Existing range analysis...
+        std::string startType = analyzeExpr(rangeExpr->start.get());
+        std::string endType = analyzeExpr(rangeExpr->end.get());
+        
+        if (startType == "error" || endType == "error") {
             return "error";
         }
         
-        // Additional validation: step cannot be zero
-        // Note: We could add compile-time validation for literal steps
-        if (auto stepLiteral = dynamic_cast<const LiteralExpr*>(rangeExpr->step.get())) {
-            if (stepLiteral->value == "0") {
+        if (startType != "int" || endType != "int") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Range expressions require integer bounds, got '" + 
+                startType + "' and '" + endType + "'",
+                currentLine, 0, "analyzing range expression");
+            return "error";
+        }
+        
+        if (rangeExpr->step) {
+            std::string stepType = analyzeExpr(rangeExpr->step.get());
+            if (stepType == "error") return "error";
+            if (stepType != "int") {
                 errorHandler.reportError(ErrorCategory::SEMANTIC,
-                    "Range step cannot be zero",
+                    "Range step must be an integer, got '" + stepType + "'",
                     currentLine, 0, "analyzing range expression");
-                errorHandler.addSuggestion("Use a non-zero step value like '1' or '-1'");
                 return "error";
             }
+            
+            if (auto stepLiteral = dynamic_cast<const LiteralExpr*>(rangeExpr->step.get())) {
+                if (stepLiteral->value == "0") {
+                    errorHandler.reportError(ErrorCategory::SEMANTIC,
+                        "Range step cannot be zero",
+                        currentLine, 0, "analyzing range expression");
+                    return "error";
+                }
+            }
         }
+        
+        return "range";
     }
-    
-    return "range";  // Return range type
-}
     
     errorHandler.reportError(ErrorCategory::SEMANTIC,
         "Unknown expression type in semantic analysis",
@@ -614,8 +613,17 @@ bool SemanticAnalyzer::areTypesCompatible(const std::string& expected, const std
         return true;
     }
     
-    // Allow bool to be treated as int in certain contexts (like conditions)
-    // But keep them distinct for function return types
+    // Array type compatibility - exact match required
+    if (isArrayType(expected) && isArrayType(actual)) {
+        return expected == actual;  // Arrays must have exact same element type
+    }
+    
+    // Special handling for empty arrays - can be assigned to any array type
+    if (expected.find("[") == 0 && actual == "[int]" && expected != "[int]") {
+        // This would need more sophisticated handling in a real compiler
+        // For now, require exact type matches for arrays
+        return false;
+    }
     
     return false;
 }
@@ -634,12 +642,12 @@ std::string SemanticAnalyzer::createFunctionSignature(const std::vector<Paramete
 void SemanticAnalyzer::validateFunctionSignature(const std::string& name, 
                                                   const std::vector<Parameter>& params,
                                                   const std::string& returnType) {
-    // Validate return type
-    validateReturnType(returnType);
+    // Validate return type (including arrays)
+    validateTypeDeclaration(returnType);
     
     // Validate parameter types and names
     for (const auto& param : params) {
-        validateReturnType(param.type);  // Same validation for parameter types
+        validateTypeDeclaration(param.type);
         
         // Check for duplicate parameter names
         for (const auto& other : params) {
@@ -661,4 +669,487 @@ void SemanticAnalyzer::validateReturnType(const std::string& returnType) {
             currentLine, 0, "validating type");
         errorHandler.addSuggestion("Use a valid type: int, double, string, bool, or void");
     }
+}
+
+
+
+void SemanticAnalyzer::handleIndexAssignmentStmt(const IndexAssignmentStmt* indexAssign) {
+    // Analyze the object being indexed
+    std::string objectType = analyzeExpr(indexAssign->object.get());
+    if (objectType == "error") return;
+    
+    // Check if object is indexable
+    if (!isArrayType(objectType) && objectType != "string") {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Cannot index into non-array, non-string type '" + objectType + "'",
+            currentLine, 0, "analyzing index assignment");
+        errorHandler.addSuggestion("Only arrays and strings can be indexed");
+        return;
+    }
+    
+    // Analyze the index
+    std::string indexType = analyzeExpr(indexAssign->index.get());
+    if (indexType == "error") return;
+    
+    if (!isValidArrayIndex(indexType)) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Array index must be an integer, got '" + indexType + "'",
+            currentLine, 0, "analyzing index assignment");
+        return;
+    }
+    
+    // Analyze the value being assigned
+    std::string valueType = analyzeExpr(indexAssign->value.get());
+    if (valueType == "error") return;
+    
+    // Check type compatibility
+    std::string expectedType;
+    if (isArrayType(objectType)) {
+        expectedType = getArrayElementType(objectType);
+    } else {
+        // String indexing - strings are mutable in our language
+        expectedType = "string";  // Individual characters are strings
+    }
+    
+    if (!areTypesCompatible(expectedType, valueType)) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Cannot assign '" + valueType + "' to " + objectType + " element of type '" + expectedType + "'",
+            currentLine, 0, "analyzing index assignment");
+        return;
+    }
+}
+
+std::string SemanticAnalyzer::analyzeArrayLiteral(const ArrayLiteralExpr* arrayLit) {
+    if (arrayLit->elements.empty()) {
+        // Empty array - type will be inferred from context or default to [int]
+        return "[int]";  // Default empty array type
+    }
+    
+    // Analyze first element to determine array type
+    std::string elementType = analyzeExpr(arrayLit->elements[0].get());
+    if (elementType == "error") return "error";
+    
+    // Check that all elements have the same type
+    for (size_t i = 1; i < arrayLit->elements.size(); ++i) {
+        std::string currentType = analyzeExpr(arrayLit->elements[i].get());
+        if (currentType == "error") return "error";
+        
+        if (!areTypesCompatible(elementType, currentType)) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Array literal has mixed element types: '" + elementType + 
+                "' and '" + currentType + "' at index " + std::to_string(i),
+                currentLine, 0, "analyzing array literal");
+            errorHandler.addSuggestion("Ensure all array elements have the same type");
+            return "error";
+        }
+    }
+    
+    return makeArrayType(elementType);  // Returns "[int]", "[string]", etc.
+}
+
+
+std::string SemanticAnalyzer::analyzeIndexExpr(const IndexExpr* indexExpr) {
+    // Analyze the object being indexed
+    std::string objectType = analyzeExpr(indexExpr->object.get());
+    if (objectType == "error") return "error";
+    
+    // Check if object is indexable
+    if (!isArrayType(objectType) && objectType != "string") {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Cannot index into non-array, non-string type '" + objectType + "'",
+            currentLine, 0, "analyzing index expression");
+        errorHandler.addSuggestion("Only arrays and strings can be indexed");
+        return "error";
+    }
+    
+    // Analyze the index
+    std::string indexType = analyzeExpr(indexExpr->index.get());
+    if (indexType == "error") return "error";
+    
+    if (!isValidArrayIndex(indexType)) {
+        errorHandler.reportError(ErrorCategory::SEMANTIC,
+            "Array index must be an integer, got '" + indexType + "'",
+            currentLine, 0, "analyzing index expression");
+        errorHandler.addSuggestion("Use an integer expression for array indexing");
+        return "error";
+    }
+    
+    // Return the element type
+    if (isArrayType(objectType)) {
+        return getArrayElementType(objectType);  // "[int]" -> "int"
+    } else {
+        return "string";  // String indexing returns a single character (string)
+    }
+}
+
+
+
+std::string SemanticAnalyzer::analyzeBuiltinCall(const CallExpr* call) {
+    const std::string& funcName = call->callee;
+    
+    if (funcName == "len") {
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "len() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing len() call");
+            return "error";
+        }
+        
+        std::string argType = analyzeExpr(call->arguments[0].get());
+        if (argType == "error") return "error";
+        
+        if (!isArrayType(argType) && argType != "string") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "len() requires array or string, got '" + argType + "'",
+                currentLine, 0, "analyzing len() call");
+            errorHandler.addSuggestion("Use len() with arrays or strings only");
+            return "error";
+        }
+        
+        return "int";
+    }
+    else if (funcName == "push") {
+        if (call->arguments.size() != 2) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "push() expects exactly two arguments, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing push() call");
+            return "error";
+        }
+        
+        std::string arrayType = analyzeExpr(call->arguments[0].get());
+        std::string elementType = analyzeExpr(call->arguments[1].get());
+        
+        if (arrayType == "error" || elementType == "error") return "error";
+        
+        if (!isArrayType(arrayType)) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "push() first argument must be an array, got '" + arrayType + "'",
+                currentLine, 0, "analyzing push() call");
+            return "error";
+        }
+        
+        std::string expectedElementType = getArrayElementType(arrayType);
+        if (!areTypesCompatible(expectedElementType, elementType)) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "push() element type mismatch: array has '" + expectedElementType + 
+                "' elements, trying to push '" + elementType + "'",
+                currentLine, 0, "analyzing push() call");
+            return "error";
+        }
+        
+        return "void";
+    }
+    else if (funcName == "pop") {
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "pop() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing pop() call");
+            return "error";
+        }
+        
+        std::string arrayType = analyzeExpr(call->arguments[0].get());
+        if (arrayType == "error") return "error";
+        
+        if (!isArrayType(arrayType)) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "pop() requires an array, got '" + arrayType + "'",
+                currentLine, 0, "analyzing pop() call");
+            return "error";
+        }
+        
+        return getArrayElementType(arrayType);  // Returns element type
+    }
+    else if (funcName == "concat") {
+        if (call->arguments.size() != 2) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "concat() expects exactly two arguments, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing concat() call");
+            return "error";
+        }
+        
+        std::string leftType = analyzeExpr(call->arguments[0].get());
+        std::string rightType = analyzeExpr(call->arguments[1].get());
+        
+        if (leftType == "error" || rightType == "error") return "error";
+        
+        if (leftType != "string" || rightType != "string") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "concat() requires two strings, got '" + leftType + "' and '" + rightType + "'",
+                currentLine, 0, "analyzing concat() call");
+            return "error";
+        }
+        
+        return "string";
+    }
+    else if (funcName == "substr") {
+        if (call->arguments.size() != 3) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "substr() expects exactly three arguments, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing substr() call");
+            return "error";
+        }
+        
+        std::string strType = analyzeExpr(call->arguments[0].get());
+        std::string startType = analyzeExpr(call->arguments[1].get());
+        std::string lenType = analyzeExpr(call->arguments[2].get());
+        
+        if (strType == "error" || startType == "error" || lenType == "error") return "error";
+        
+        if (strType != "string") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "substr() first argument must be string, got '" + strType + "'",
+                currentLine, 0, "analyzing substr() call");
+            return "error";
+        }
+        
+        if (startType != "int" || lenType != "int") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "substr() start and length must be integers, got '" + startType + "' and '" + lenType + "'",
+                currentLine, 0, "analyzing substr() call");
+            return "error";
+        }
+        
+        return "string";
+    }
+    else if (funcName == "input") {
+        if (call->arguments.size() != 0) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "input() expects no arguments, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing input() call");
+            return "error";
+        }
+        return "string";
+    }
+    else if (funcName == "println") {
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "println() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing println() call");
+            return "error";
+        }
+        
+        std::string argType = analyzeExpr(call->arguments[0].get());
+        if (argType == "error") return "error";
+        
+        return "void";
+    }
+    else if (funcName == "to_string") {
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "to_string() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing to_string() call");
+            return "error";
+        }
+        
+        std::string argType = analyzeExpr(call->arguments[0].get());
+        if (argType == "error") return "error";
+        
+        return "string";
+    }
+    else if (funcName == "to_int") {
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "to_int() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing to_int() call");
+            return "error";
+        }
+        
+        std::string argType = analyzeExpr(call->arguments[0].get());
+        if (argType == "error") return "error";
+        
+        if (argType != "string") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "to_int() requires string argument, got '" + argType + "'",
+                currentLine, 0, "analyzing to_int() call");
+            return "error";
+        }
+        
+        return "int";
+    }
+    else if (funcName == "to_double") {
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "to_double() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing to_double() call");
+            return "error";
+        }
+        
+        std::string argType = analyzeExpr(call->arguments[0].get());
+        if (argType == "error") return "error";
+        
+        if (argType != "string") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "to_double() requires string argument, got '" + argType + "'",
+                currentLine, 0, "analyzing to_double() call");
+            return "error";
+        }
+        
+        return "double";
+    }
+    else if (funcName == "print") {
+        // Existing print analysis
+        if (call->arguments.size() != 1) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "print() expects exactly one argument, got " + std::to_string(call->arguments.size()),
+                currentLine, 0, "analyzing print() call");
+            return "error";
+        }
+        
+        std::string argType = analyzeExpr(call->arguments[0].get());
+        if (argType == "error") return "error";
+        
+        return "void";
+    }
+    
+    errorHandler.reportError(ErrorCategory::SEMANTIC,
+        "Unknown built-in function: " + funcName,
+        currentLine, 0, "analyzing built-in call");
+    return "error";
+}
+
+
+std::string SemanticAnalyzer::getArrayElementType(const std::string& arrayType) {
+    if (!isArrayType(arrayType)) return arrayType;
+    
+    // "[int]" -> "int", "[[string]]" -> "[string]"
+    if (arrayType.size() >= 3 && arrayType[0] == '[' && arrayType.back() == ']') {
+        return arrayType.substr(1, arrayType.size() - 2);
+    }
+    
+    return "unknown";
+}
+
+std::string SemanticAnalyzer::makeArrayType(const std::string& elementType) {
+    return "[" + elementType + "]";
+}
+
+bool SemanticAnalyzer::isArrayType(const std::string& type) {
+    return type.size() >= 3 && type[0] == '[' && type.back() == ']';
+}
+
+int SemanticAnalyzer::getArrayDimensions(const std::string& arrayType) {
+    int dimensions = 0;
+    for (char c : arrayType) {
+        if (c == '[') dimensions++;
+        else break;
+    }
+    return dimensions;
+}
+
+bool SemanticAnalyzer::isValidArrayIndex(const std::string& indexType) {
+    return indexType == "int";
+}
+
+bool SemanticAnalyzer::canConcatenate(const std::string& leftType, const std::string& rightType) {
+    return leftType == "string" && rightType == "string";
+}
+
+std::string SemanticAnalyzer::inferBinaryResultType(const std::string& leftType, 
+                                                    const std::string& rightType, 
+                                                    const std::string& op) {
+    // String concatenation with +
+    if (op == "+" && canConcatenate(leftType, rightType)) {
+        return "string";
+    }
+    
+    // Arithmetic operations
+    if (op == "+" || op == "-" || op == "*" || op == "/") {
+        if (leftType != rightType) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Type mismatch in binary expression: '" + leftType + "' " + op + " '" + rightType + "'",
+                currentLine, 0, "analyzing binary expression");
+            return "error";
+        }
+        
+        if (leftType == "int" || leftType == "double") {
+            return leftType;
+        } else {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Arithmetic operator '" + op + "' requires numeric types, got '" + leftType + "'",
+                currentLine, 0, "analyzing binary expression");
+            return "error";
+        }
+    }
+    
+    // Modulo operator
+    if (op == "%") {
+        if (leftType != rightType || leftType != "int") {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Modulo operator requires integer operands, got '" + leftType + "' and '" + rightType + "'",
+                currentLine, 0, "analyzing binary expression");
+            return "error";
+        }
+        return "int";
+    }
+    
+    // Comparison operators
+    if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=") {
+        if (!areTypesCompatible(leftType, rightType)) {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Type mismatch in comparison: '" + leftType + "' " + op + " '" + rightType + "'",
+                currentLine, 0, "analyzing binary expression");
+            return "error";
+        }
+        
+        if (leftType == "int" || leftType == "double" || leftType == "string") {
+            return "bool";
+        } else {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Comparison operator '" + op + "' requires numeric or string types, got '" + leftType + "'",
+                currentLine, 0, "analyzing binary expression");
+            return "error";
+        }
+    }
+    
+    // Logical operators
+    if (op == "&&" || op == "||") {
+        if ((leftType == "int" || leftType == "double" || leftType == "bool") && 
+            (rightType == "int" || rightType == "double" || rightType == "bool")) {
+            return "bool";
+        } else {
+            errorHandler.reportError(ErrorCategory::SEMANTIC,
+                "Logical operator '" + op + "' requires boolean-convertible types",
+                currentLine, 0, "analyzing binary expression");
+            return "error";
+        }
+    }
+    
+    errorHandler.reportError(ErrorCategory::SEMANTIC,
+        "Unknown binary operator: " + op,
+        currentLine, 0, "analyzing binary expression");
+    return "error";
+}
+
+
+
+void SemanticAnalyzer::validateTypeDeclaration(const std::string& typeDecl) {
+    if (typeDecl.empty()) return;
+    
+    // Validate basic types
+    if (typeDecl == "int" || typeDecl == "double" || typeDecl == "string" || 
+        typeDecl == "bool" || typeDecl == "void") {
+        return;
+    }
+    
+    // Validate array types
+    if (isArrayType(typeDecl)) {
+        std::string elementType = getArrayElementType(typeDecl);
+        validateTypeDeclaration(elementType);  // Recursive validation
+        return;
+    }
+    
+    // Unknown type
+    errorHandler.reportError(ErrorCategory::SEMANTIC,
+        "Unknown type '" + typeDecl + "' in declaration",
+        currentLine, 0, "validating type declaration");
+    errorHandler.addSuggestion("Use valid types like 'int', 'string', '[int]', or nested arrays like '[[string]]'");
+}
+
+void SemanticAnalyzer::debugPrintType(const std::string& type, const std::string& context) {
+    std::cout << "DEBUG [" << context << "]: Type = '" << type << "'";
+    if (isArrayType(type)) {
+        std::cout << " (Array, element type: '" << getArrayElementType(type) 
+                  << "', dimensions: " << getArrayDimensions(type) << ")";
+    }
+    std::cout << std::endl;
 }

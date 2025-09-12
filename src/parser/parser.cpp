@@ -12,6 +12,7 @@ std::vector<std::unique_ptr<Stmt>> Parser::parse() {
     std::vector<std::unique_ptr<Stmt>> statements;
     
     while (!isAtEnd()) {
+    std::cerr << "[DEBUG] parse loop: current=" << current << ", token=" << peek().lexeme << " (type=" << static_cast<int>(peek().type) << ")" << std::endl;
         try {
             auto stmt = declaration();
             if (stmt) {
@@ -146,22 +147,24 @@ std::unique_ptr<Stmt> Parser::statement() {
     
     // Check for assignment vs expression statement
     if (check(TokenType::IDENTIFIER)) {
-        // Look ahead to see if this is an assignment
         size_t saved = current;
         advance(); // consume identifier
         
-        if (match({TokenType::ASSIGN})) {
-            // This is an assignment: identifier = expression;
-            current = saved; // Reset to identifier
+        if (match({TokenType::LBRACK})) {
+            // This might be index assignment: arr[i] = value
+            current = saved;
+            return parseIndexAssignmentOrExpression();
+        } else if (match({TokenType::ASSIGN})) {
+            // Regular assignment: identifier = expression
+            current = saved;
             return assignmentStatement();
         } else {
-            // This is an expression statement
-            current = saved; // Reset to identifier
+            // Expression statement
+            current = saved;
             return expressionStatement();
         }
     }
     
-    // Default to expression statement
     return expressionStatement();
 }
 
@@ -336,7 +339,15 @@ std::unique_ptr<Expr> Parser::additive() {
     while (match({TokenType::PLUS, TokenType::MINUS})) {
         std::string op = previous().lexeme;
         auto right = multiplicative();
-        expr = std::make_unique<BinaryExpr>(std::move(expr), op, std::move(right));
+        
+        // Special handling for string concatenation
+        if (op == "+") {
+            // This could be either arithmetic addition or string concatenation
+            // Let semantic analysis decide based on types
+            expr = std::make_unique<BinaryExpr>(std::move(expr), op, std::move(right));
+        } else {
+            expr = std::make_unique<BinaryExpr>(std::move(expr), op, std::move(right));
+        }
     }
     
     return expr;
@@ -365,83 +376,108 @@ std::unique_ptr<Expr> Parser::unary() {
 }
 
 std::unique_ptr<Expr> Parser::call() {
-    if (!check(TokenType::IDENTIFIER)) {
+    // Accept both identifiers and built-in function keywords as function names
+    if (!(check(TokenType::IDENTIFIER)
+          || check(TokenType::KW_LEN) || check(TokenType::KW_PUSH) || check(TokenType::KW_POP)
+          || check(TokenType::KW_CONCAT) || check(TokenType::KW_SUBSTR) || check(TokenType::KW_INPUT)
+          || check(TokenType::KW_PRINTLN) || check(TokenType::KW_TO_STRING) || check(TokenType::KW_TO_INT) || check(TokenType::KW_TO_DOUBLE))) {
         return primary();
     }
-    
-    std::string calleeName = advance().lexeme;
-    
-    if (!match({TokenType::LPAREN})) {
-        // This is a variable reference, not a function call
-        return std::make_unique<VariableExpr>(calleeName);
+
+    std::string name = advance().lexeme;
+
+    // Handle function calls (built-in or user-defined)
+    if (match({TokenType::LPAREN})) {
+        auto callExpr = std::make_unique<CallExpr>(name);
+        // Parse arguments if any
+        if (!check(TokenType::RPAREN)) {
+            do {
+                callExpr->arguments.push_back(expression());
+            } while (match({TokenType::COMMA}));
+        }
+        consume(TokenType::RPAREN, "Expected ')' after arguments.");
+        return callExpr;
     }
-    
-    auto callExpr = std::make_unique<CallExpr>(calleeName);
-    
-    if (!check(TokenType::RPAREN)) {
-        do {
-            callExpr->arguments.push_back(expression());
-        } while (match({TokenType::COMMA}));
+
+    // This is a variable reference, not a function call
+    std::unique_ptr<Expr> varExpr = std::make_unique<VariableExpr>(name);
+
+    // Check for array indexing
+    while (match({TokenType::LBRACK})) {
+        auto index = expression();
+        consume(TokenType::RBRACK, "Expected ']' after array index");
+        varExpr = std::make_unique<IndexExpr>(std::move(varExpr), std::move(index));
     }
-    
-    consume(TokenType::RPAREN, "Expected ')' after arguments.");
-    
-    return callExpr;
+
+    return varExpr;
 }
+
 
 std::unique_ptr<Expr> Parser::primary() {
     // Handle boolean literals
     if (match({TokenType::KW_TRUE})) {
-        return std::make_unique<LiteralExpr>("1");  // true as 1
+        return std::make_unique<LiteralExpr>("1");
     }
     
     if (match({TokenType::KW_FALSE})) {
-        return std::make_unique<LiteralExpr>("0");  // false as 0
+        return std::make_unique<LiteralExpr>("0");
     }
     
+    // Handle array literals [1, 2, 3]
+    if (match({TokenType::LBRACK})) {
+        return parseArrayLiteral();
+    }
+    
+    // Handle regular literals
     if (match({TokenType::INT_LITERAL, TokenType::FLOAT_LITERAL, TokenType::STRING_LITERAL})) {
         return std::make_unique<LiteralExpr>(previous().lexeme);
     }
     
-    if (match({TokenType::IDENTIFIER})) {
-        Token name = previous();
-        return std::make_unique<VariableExpr>(name.lexeme);
-    }
+    // REMOVED: Don't handle identifiers here - they should be handled in call()
     
+    // Handle parenthesized expressions
     if (match({TokenType::LPAREN})) {
         auto expr = expression();
         consume(TokenType::RPAREN, "Expected ')' after expression.");
         return expr;
     }
     
+    // Error case
     Token current = peek();
     errorHandler.reportError(ErrorCategory::SYNTAX,
         "Expected expression", current.line, current.column, "parsing primary expression");
-    errorHandler.addSuggestion("Provide a number, string, boolean, or variable name");
+    errorHandler.addSuggestion("Provide a number, string, boolean, array literal, or variable name");
     
-    return nullptr;  // Error recovery
+    return nullptr;
 }
+
 
 
 void Parser::synchronize() {
     advance();
     
+    int syncCount = 0;
     while (!isAtEnd()) {
+    std::cerr << "[DEBUG] synchronize: current=" << current << ", token=" << peek().lexeme << " (type=" << static_cast<int>(peek().type) << ")" << std::endl;
         if (previous().type == TokenType::SEMICOLON) return;
-        
         switch (peek().type) {
             case TokenType::KW_LET:
-            case TokenType::KW_FN:        // ADD THIS
+            case TokenType::KW_FN:
             case TokenType::KW_IF:
             case TokenType::KW_WHILE:
             case TokenType::KW_FOR:
-            case TokenType::KW_RETURN:    // ADD THIS
+            case TokenType::KW_RETURN:
                 return;
             default:
                 break;
         }
-        
         advance();
+        // Prevent infinite loops
+        if (++syncCount > 100) {
+            errorHandler.reportFatal(ErrorCategory::SYNTAX, 
+                "Parser synchronization failed - too many errors");
+            break;
+        }
     }
 }
 
@@ -495,18 +531,25 @@ std::vector<Parameter> Parser::parseParameterList() {
     return parameters;
 }
 
-// NEW: Parse type annotations
+// MODIFY parseTypeAnnotation() to support array types:
 std::string Parser::parseTypeAnnotation() {
+    // Check for array type syntax: [type] or [[type]]
+    if (match({TokenType::LBRACK})) {
+        return parseArrayType();
+    }
+    
+    // Regular type parsing (existing code)
     if (isTypeKeyword(peek().type)) {
         Token typeToken = advance();
         return tokenTypeToTypeString(typeToken.type);
     } else {
         errorHandler.reportError(ErrorCategory::SYNTAX,
             "Expected type annotation", peek().line, peek().column, "parsing type");
-        errorHandler.addSuggestion("Use a valid type like 'int', 'double', 'string', 'bool', or 'void'");
-        return "int";  // Default fallback
+        errorHandler.addSuggestion("Use a valid type like 'int', '[int]', 'string', 'bool', or 'void'");
+        return "int";
     }
 }
+
 
 // NEW: Helper functions for type checking
 bool Parser::isTypeKeyword(TokenType type) const {
@@ -525,3 +568,123 @@ std::string Parser::tokenTypeToTypeString(TokenType type) const {
         default: return "unknown";
     }
 }
+
+
+// 2. NEW: parseArrayType() method:
+std::string Parser::parseArrayType() {
+    // Already consumed the opening '['
+    std::string baseType;
+    
+    // Check for nested arrays: [[int]]
+    if (check(TokenType::LBRACK)) {
+        baseType = parseArrayType();  // Recursive call for nested arrays
+    } else {
+        // Parse base type
+        if (isTypeKeyword(peek().type)) {
+            Token typeToken = advance();
+            baseType = tokenTypeToTypeString(typeToken.type);
+        } else {
+            errorHandler.reportError(ErrorCategory::SYNTAX,
+                "Expected base type in array declaration", 
+                peek().line, peek().column, "parsing array type");
+            baseType = "int";  // Default fallback
+        }
+    }
+    
+    consume(TokenType::RBRACK, "Expected ']' after array type");
+    return "[" + baseType + "]";  // Return "[int]", "[[string]]", etc.
+}
+
+
+
+std::unique_ptr<Stmt> Parser::parseIndexAssignmentOrExpression() {
+    // Save the current position
+    size_t savedPosition = current;
+    
+    // Try to parse as a regular expression first
+    auto expr = expression();
+    
+    // Check if this is actually an assignment
+    if (match({TokenType::ASSIGN})) {
+        // expr should be an IndexExpr for valid index assignment
+        if (auto indexExpr = dynamic_cast<IndexExpr*>(expr.get())) {
+            // Extract components and create IndexAssignmentStmt
+            // FIXED: Create new copies instead of releasing from unique_ptr
+            auto objectCopy = std::unique_ptr<Expr>();
+            auto indexCopy = std::unique_ptr<Expr>();
+            
+            // Create copies of the expressions
+            if (auto varExpr = dynamic_cast<VariableExpr*>(indexExpr->object.get())) {
+                objectCopy = std::make_unique<VariableExpr>(varExpr->name);
+            }
+            
+            if (auto litExpr = dynamic_cast<LiteralExpr*>(indexExpr->index.get())) {
+                indexCopy = std::make_unique<LiteralExpr>(litExpr->value);
+            } else if (auto varExpr = dynamic_cast<VariableExpr*>(indexExpr->index.get())) {
+                indexCopy = std::make_unique<VariableExpr>(varExpr->name);
+            }
+            
+            auto value = expression();
+            
+            consume(TokenType::SEMICOLON, "Expected ';' after index assignment");
+            return std::make_unique<IndexAssignmentStmt>(
+                std::move(objectCopy), std::move(indexCopy), std::move(value));
+        } else {
+            errorHandler.reportError(ErrorCategory::SYNTAX,
+                "Invalid left-hand side of assignment", 
+                peek().line, peek().column, "parsing assignment");
+            return nullptr;
+        }
+    }
+    
+    // Otherwise, it's an expression statement
+    consume(TokenType::SEMICOLON, "Expected ';' after expression");
+    return std::make_unique<ExprStmt>(std::move(expr));
+}
+
+
+
+
+std::unique_ptr<Expr> Parser::parseArrayLiteral() {
+    // Already consumed the opening '['
+    auto arrayExpr = std::make_unique<ArrayLiteralExpr>();
+    
+    // Handle empty array []
+    if (match({TokenType::RBRACK})) {
+        return arrayExpr;
+    }
+    
+    // Parse array elements
+    do {
+        auto element = expression();
+        if (element) {
+            arrayExpr->elements.push_back(std::move(element));
+        }
+    } while (match({TokenType::COMMA}));
+    
+    consume(TokenType::RBRACK, "Expected ']' after array elements");
+    return arrayExpr;
+}
+
+
+bool Parser::isBuiltinFunction(const std::string& name) const {
+    return name == "len" || name == "push" || name == "pop" || 
+           name == "concat" || name == "substr" || name == "input" || 
+           name == "println" || name == "to_string" || name == "to_int" || 
+           name == "to_double";
+}
+
+// std::unique_ptr<Expr> Parser::parseBuiltinFunction(const std::string& name) {
+//     // DON'T consume LPAREN here - it was already consumed in call()
+    
+//     auto callExpr = std::make_unique<CallExpr>(name);
+    
+//     if (!check(TokenType::RPAREN)) {
+//         do {
+//             callExpr->arguments.push_back(expression());
+//         } while (match({TokenType::COMMA}));
+//     }
+    
+//     consume(TokenType::RPAREN, "Expected ')' after built-in function arguments");
+//     return callExpr;
+// }

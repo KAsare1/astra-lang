@@ -45,11 +45,33 @@ private:
                                    const std::vector<Parameter>& params,
                                    const std::string& returnType);
     void validateReturnType(const std::string& returnType);
-    bool areTypesCompatible(const std::string& expected, const std::string& actual);
     std::string createFunctionSignature(const std::vector<Parameter>& params, 
                                         const std::string& returnType);
 
     // Utility
     void checkForUnusedVariables();
     void checkForUnusedFunctions();  // NEW
+
+
+    // NEW: Data structure analysis methods
+    void handleIndexAssignmentStmt(const IndexAssignmentStmt* indexAssign);
+    std::string analyzeArrayLiteral(const ArrayLiteralExpr* arrayLit);
+    std::string analyzeIndexExpr(const IndexExpr* indexExpr);
+    std::string analyzeBuiltinCall(const CallExpr* call);
+    
+    // NEW: Type system helpers for arrays
+    std::string getArrayElementType(const std::string& arrayType);
+    std::string makeArrayType(const std::string& elementType);
+    bool isArrayType(const std::string& type);
+    int getArrayDimensions(const std::string& arrayType);
+    bool isValidArrayIndex(const std::string& indexType);
+    
+    // Enhanced type compatibility
+    bool areTypesCompatible(const std::string& expected, const std::string& actual);
+    bool canConcatenate(const std::string& leftType, const std::string& rightType);
+    std::string inferBinaryResultType(const std::string& leftType, 
+                                     const std::string& rightType, 
+                                     const std::string& op);
+    void validateTypeDeclaration(const std::string& typeDecl);
+    void debugPrintType(const std::string& type, const std::string& context);
 };
